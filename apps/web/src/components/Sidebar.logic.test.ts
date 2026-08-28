@@ -26,6 +26,7 @@ import {
   searchSidebarProjectsByName,
   sidebarProjectActivityOf,
   sortSidebarLaneProjects,
+  toggleSidebarPinnedProject,
   summarizeSidebarProjectActivity,
   searchSidebarThreadsByTitle,
   formatWorkingDurationLabel,
@@ -894,6 +895,45 @@ describe("sortSidebarLaneProjects", () => {
     const input = [...projects];
     sortSidebarLaneProjects(input, "alphabetical", activity);
     expect(input.map((p) => p.projectKey)).toEqual(["beta", "alpha", "quiet"]);
+  });
+
+  it("floats pinned projects to the top in the order they were pinned", () => {
+    expect(
+      sortSidebarLaneProjects(projects, "activity", activity, ["quiet", "beta"]).map(
+        (p) => p.projectKey,
+      ),
+    ).toEqual(["quiet", "beta", "alpha"]);
+  });
+
+  it("keeps pinned rows still when the sort underneath them changes", () => {
+    const pinned = ["quiet", "beta"];
+    expect(
+      sortSidebarLaneProjects(projects, "alphabetical", activity, pinned).map((p) => p.projectKey),
+    ).toEqual(["quiet", "beta", "alpha"]);
+  });
+
+  it("ignores pinned keys for projects that are not there", () => {
+    expect(
+      sortSidebarLaneProjects(projects, "alphabetical", activity, ["gone", "beta"]).map(
+        (p) => p.projectKey,
+      ),
+    ).toEqual(["beta", "alpha", "quiet"]);
+  });
+});
+
+describe("toggleSidebarPinnedProject", () => {
+  it("appends a new pin so pin order is chronological", () => {
+    expect(toggleSidebarPinnedProject(["alpha"], "beta")).toEqual(["alpha", "beta"]);
+  });
+
+  it("removes an existing pin", () => {
+    expect(toggleSidebarPinnedProject(["alpha", "beta"], "alpha")).toEqual(["beta"]);
+  });
+
+  it("does not mutate the input", () => {
+    const input = ["alpha"];
+    toggleSidebarPinnedProject(input, "beta");
+    expect(input).toEqual(["alpha"]);
   });
 });
 

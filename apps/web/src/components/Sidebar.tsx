@@ -145,6 +145,7 @@ import {
   sidebarProjectActivityOf,
   sortSidebarLaneProjects,
   summarizeSidebarProjectActivity,
+  toggleSidebarPinnedProject,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
   sortLogicalProjectsForSidebar,
@@ -210,6 +211,10 @@ const PROJECT_LANE_SORT_KEY = "t3code:sidebar:project-lane-sort";
 // member and also drives thread grouping, so reusing it would answer a
 // different question and require a contract change on the server.
 const ProjectLaneSortSchema = Schema.Literals(["activity", "alphabetical"]);
+const PINNED_PROJECTS_KEY = "t3code:sidebar:pinned-projects";
+// Client-side for the same reason the lane sort is: the server has no notion of
+// a pinned project, and thread.pin does not generalise to one.
+const PinnedProjectsSchema = Schema.Array(Schema.String);
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "now";
@@ -2222,9 +2227,30 @@ export default function Sidebar() {
       }),
     [activeThreads, logicalProjectKeyByThreadProjectKey, pinnedThreads, threadLastVisitedAtById],
   );
+  const [pinnedProjectKeys, setPinnedProjectKeys] = useLocalStorage(
+    PINNED_PROJECTS_KEY,
+    [] as readonly string[],
+    PinnedProjectsSchema,
+  );
+  const toggleProjectPin = useCallback(
+    (projectKey: string) => {
+      setPinnedProjectKeys((keys) => toggleSidebarPinnedProject(keys, projectKey));
+    },
+    [setPinnedProjectKeys],
+  );
   const laneProjects = useMemo(
-    () => sortSidebarLaneProjects(projectGroups, projectLaneSort, projectActivityByKey),
-    [projectActivityByKey, projectGroups, projectLaneSort],
+    () =>
+      sortSidebarLaneProjects(
+        projectGroups,
+        projectLaneSort,
+        projectActivityByKey,
+        pinnedProjectKeys,
+      ),
+    [pinnedProjectKeys, projectActivityByKey, projectGroups, projectLaneSort],
+  );
+  const pinnedLaneProjectCount = useMemo(
+    () => laneProjects.filter((project) => pinnedProjectKeys.includes(project.projectKey)).length,
+    [laneProjects, pinnedProjectKeys],
   );
 
   const threadSearchResults = useMemo(
@@ -3770,51 +3796,91 @@ export default function Sidebar() {
                       <span className="min-w-0 flex-1 truncate">All projects</span>
                     </SidebarMenuButton>
                   </li>
-                  {laneProjects.map((project) => (
-                    <li key={project.projectKey} className="relative flex items-center">
-                      <SidebarMenuButton
-                        type="button"
-                        onClick={() => selectProjectScope(project.projectKey)}
-                        data-active={projectScopeKey === project.projectKey}
-                        className="h-7 w-full min-w-0 pe-8 text-[0.8125rem]"
+                  {laneProjects.map((project, index) => {
+                    const isPinnedProject = pinnedProjectKeys.includes(project.projectKey);
+                    return (
+                      <li
+                        key={project.projectKey}
+                        className={cn(
+                          "group/lane-row relative flex items-center gap-0.5",
+                          // The pinned block ends here: same rule the thread list
+                          // draws under its pinned rows, so the two read alike.
+                          index === pinnedLaneProjectCount - 1 &&
+                            index < laneProjects.length - 1 &&
+                            "mb-2 border-sidebar-muted-foreground/45 border-b pb-2",
+                        )}
                       >
-                        <span
-                          style={projectColorStyle(project.displayName)}
-                          className="flex shrink-0 items-center text-[color:var(--project-color,var(--sidebar-icon-color))]"
+                        <SidebarMenuButton
+                          type="button"
+                          onClick={() => selectProjectScope(project.projectKey)}
+                          data-active={projectScopeKey === project.projectKey}
+                          className="h-7 min-w-0 flex-1 text-[0.8125rem]"
                         >
-                          <ProjectFavicon
-                            environmentId={project.environmentId}
-                            cwd={project.workspaceRoot}
-                            faviconPath={project.faviconPath}
-                            className="size-4 shrink-0 text-current"
-                          />
-                        </span>
-                        <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
-                        {/* Same glyphs and hues the thread rows use for Working
+                          <span
+                            style={projectColorStyle(project.displayName)}
+                            className="flex shrink-0 items-center text-[color:var(--project-color,var(--sidebar-icon-color))]"
+                          >
+                            <ProjectFavicon
+                              environmentId={project.environmentId}
+                              cwd={project.workspaceRoot}
+                              faviconPath={project.faviconPath}
+                              className="size-4 shrink-0 text-current"
+                            />
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
+                          {/* Same glyphs and hues the thread rows use for Working
                             and Done, so the lane reads as a summary of the rows
                             behind it rather than as its own vocabulary. */}
-                        <SidebarProjectActivityBadges
-                          activity={sidebarProjectActivityOf(
-                            projectActivityByKey,
-                            project.projectKey,
+                          <SidebarProjectActivityBadges
+                            activity={sidebarProjectActivityOf(
+                              projectActivityByKey,
+                              project.projectKey,
+                            )}
+                            projectName={project.displayName}
+                          />
+                        </SidebarMenuButton>
+                        {/* Pin sits in the flow rather than over the label, so
+                          revealing it on hover cannot shift or cover the name.
+                          A pinned row keeps it visible: that is the state. */}
+                        <Button
+                          size="icon-xs"
+                          variant="ghost-muted"
+                          aria-label={
+                            isPinnedProject
+                              ? `Unpin ${project.displayName}`
+                              : `Pin ${project.displayName}`
+                          }
+                          title={isPinnedProject ? "Unpin project" : "Pin project"}
+                          aria-pressed={isPinnedProject}
+                          className={cn(
+                            "size-6 shrink-0 [--control-icon-color:currentColor]",
+                            isPinnedProject
+                              ? "text-sidebar-foreground"
+                              : "text-icon-muted opacity-0 transition-opacity group-hover/lane-row:opacity-100 focus-visible:opacity-100",
                           )}
-                          projectName={project.displayName}
-                        />
-                      </SidebarMenuButton>
-                      <Button
-                        size="icon-xs"
-                        variant="ghost-muted"
-                        aria-label={`Project settings for ${project.displayName}`}
-                        title={`Project settings for ${project.displayName}`}
-                        className="absolute end-1 size-6 [--control-icon-color:currentColor] text-icon-muted"
-                        onClick={(event) => {
-                          void handleProjectSettings(event, project);
-                        }}
-                      >
-                        <SettingsIcon className="size-3.5" />
-                      </Button>
-                    </li>
-                  ))}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            toggleProjectPin(project.projectKey);
+                          }}
+                        >
+                          <PinIcon className={cn("size-3.5", isPinnedProject && "fill-current")} />
+                        </Button>
+                        <Button
+                          size="icon-xs"
+                          variant="ghost-muted"
+                          aria-label={`Project settings for ${project.displayName}`}
+                          title={`Project settings for ${project.displayName}`}
+                          className="size-6 shrink-0 [--control-icon-color:currentColor] text-icon-muted"
+                          onClick={(event) => {
+                            void handleProjectSettings(event, project);
+                          }}
+                        >
+                          <SettingsIcon className="size-3.5" />
+                        </Button>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
               <div
@@ -4113,7 +4179,10 @@ export default function Sidebar() {
                               key="pinned-divider"
                               aria-hidden
                               data-testid="sidebar-pinned-divider"
-                              className="mx-2.5 my-1.5 h-px list-none bg-sidebar-border/60"
+                              // The pinned block is a section boundary, not a hairline
+                              // between rows: at 60% of an already faint border it read
+                              // as an artifact rather than as a divider.
+                              className="mx-2.5 my-2 h-px list-none bg-sidebar-muted-foreground/45"
                             />,
                           );
                         }

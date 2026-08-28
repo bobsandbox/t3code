@@ -582,15 +582,48 @@ export function sortSidebarLaneProjects<
   projects: readonly T[],
   sort: SidebarProjectLaneSort,
   activity: ReadonlyMap<string, SidebarProjectActivitySummary>,
+  pinnedProjectKeys: readonly string[] = [],
 ): T[] {
   const byName = (left: T, right: T) =>
     left.displayName.localeCompare(right.displayName, undefined, { sensitivity: "base" });
-  if (sort === "alphabetical") return [...projects].sort(byName);
-  return [...projects].sort((left, right) => {
-    const leftActivity = sidebarProjectActivityOf(activity, left.projectKey).lastActivityMs;
-    const rightActivity = sidebarProjectActivityOf(activity, right.projectKey).lastActivityMs;
-    return rightActivity - leftActivity || byName(left, right);
-  });
+  const bySort =
+    sort === "alphabetical"
+      ? byName
+      : (left: T, right: T) => {
+          const leftActivity = sidebarProjectActivityOf(activity, left.projectKey).lastActivityMs;
+          const rightActivity = sidebarProjectActivityOf(activity, right.projectKey).lastActivityMs;
+          return rightActivity - leftActivity || byName(left, right);
+        };
+  if (pinnedProjectKeys.length === 0) return [...projects].sort(bySort);
+  // Pinned projects keep the order they were pinned in, not the active sort:
+  // the point of pinning a project is that its row stops moving. Everything
+  // else follows the sort underneath them.
+  const pinnedRank = new Map(pinnedProjectKeys.map((key, index) => [key, index] as const));
+  const pinned: T[] = [];
+  const rest: T[] = [];
+  for (const project of projects) {
+    if (pinnedRank.has(project.projectKey)) pinned.push(project);
+    else rest.push(project);
+  }
+  pinned.sort(
+    (left, right) =>
+      (pinnedRank.get(left.projectKey) ?? 0) - (pinnedRank.get(right.projectKey) ?? 0),
+  );
+  return [...pinned, ...rest.sort(bySort)];
+}
+
+/** Pinning is client-side (the 0.0.35 server has no project pin), so the stored
+    list can outlive the projects in it — a removed project, or one that only
+    exists on an environment that is currently offline. Keys are kept rather
+    than pruned so a project that comes back comes back pinned; callers filter
+    for display. */
+export function toggleSidebarPinnedProject(
+  pinnedProjectKeys: readonly string[],
+  projectKey: string,
+): string[] {
+  return pinnedProjectKeys.includes(projectKey)
+    ? pinnedProjectKeys.filter((key) => key !== projectKey)
+    : [...pinnedProjectKeys, projectKey];
 }
 
 export function sidebarProjectActivityOf(
