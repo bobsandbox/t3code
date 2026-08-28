@@ -3602,6 +3602,12 @@ export default function Sidebar() {
   // multi-project setup it opens the picker. This is the second button, and it
   // only exists while the sidebar is scoped to a project — then the answer to
   // "which project" is already on screen, so it skips the picker entirely.
+  // The row follows the level you are LOOKING at, not just the scope you are
+  // filtered to. Sliding the projects lane open is stepping back up to the
+  // list, so the row has to go with you even though the scope is still set —
+  // otherwise it keeps offering the project you just navigated away from.
+  const atProjectLevel = scopedProjectGroup !== null && !projectPanelOpen;
+
   const handleNewThreadInScopedProject = useCallback(() => {
     if (scopedProjectGroup === null) return;
     if (isMobile) setOpenMobile(false);
@@ -3771,7 +3777,7 @@ export default function Sidebar() {
                 purpose for the functions that come next. */}
             {projectGroups.length > 0 ? (
               <div className="mt-1 flex items-center gap-1 border-sidebar-border/60 border-t pt-1.5">
-                {scopedProjectGroup ? (
+                {atProjectLevel && scopedProjectGroup !== null ? (
                   <SidebarMenuButton
                     type="button"
                     onClick={handleNewThreadInScopedProject}
