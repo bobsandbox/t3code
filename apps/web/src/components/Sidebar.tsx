@@ -125,6 +125,7 @@ import {
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
+import { buildProjectActionMenuItems } from "./projectActionMenu.logic";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   animatePinnedLayoutChanges,
@@ -2067,10 +2068,8 @@ export default function Sidebar() {
     clearSelection();
   }, [clearSelection, projectScopeKey]);
 
-  const handleProjectSettings = useCallback(
-    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
-      event.preventDefault();
-      event.stopPropagation();
+  const openProjectSettings = useCallback(
+    (projectGroup: SidebarProjectSnapshot) => {
       toggleProjectPanel(false);
       if (isMobile) {
         setOpenMobile(false);
@@ -2081,6 +2080,14 @@ export default function Sidebar() {
       });
     },
     [isMobile, router, setOpenMobile, toggleProjectPanel],
+  );
+  const handleProjectSettings = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openProjectSettings(projectGroup);
+    },
+    [openProjectSettings],
   );
 
   // Settled threads stay in the live shell stream (settled ≠ archived), so
@@ -2232,11 +2239,39 @@ export default function Sidebar() {
     [] as readonly string[],
     PinnedProjectsSchema,
   );
+  const pinnedProjectKeysRef = useRef(pinnedProjectKeys);
+  pinnedProjectKeysRef.current = pinnedProjectKeys;
   const toggleProjectPin = useCallback(
     (projectKey: string) => {
       setPinnedProjectKeys((keys) => toggleSidebarPinnedProject(keys, projectKey));
     },
     [setPinnedProjectKeys],
+  );
+  // Right-click is how a thread gets pinned, so it is how a project gets
+  // pinned. Same api.contextMenu path, which means the desktop build gets a
+  // native menu and the browser gets the DOM fallback, exactly as threads do.
+  const handleProjectContextMenu = useCallback(
+    (event: ReactMouseEvent, project: SidebarProjectSnapshot) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const position = { x: event.clientX, y: event.clientY };
+      const api = readLocalApi();
+      if (!api) return;
+      void (async () => {
+        const clicked = await api.contextMenu.show(
+          buildProjectActionMenuItems({
+            isPinned: pinnedProjectKeysRef.current.includes(project.projectKey),
+          }),
+          position,
+        );
+        if (clicked === "pin" || clicked === "unpin") {
+          toggleProjectPin(project.projectKey);
+          return;
+        }
+        if (clicked === "settings") openProjectSettings(project);
+      })();
+    },
+    [openProjectSettings, toggleProjectPin],
   );
   const laneProjects = useMemo(
     () =>
@@ -3838,6 +3873,7 @@ export default function Sidebar() {
                               : undefined
                           }
                           {...(sortable?.listeners ?? {})}
+                          onContextMenu={(event) => handleProjectContextMenu(event, project)}
                           className={cn(
                             "group/lane-row relative flex items-center gap-0.5",
                             sortable && "touch-none",
@@ -3862,6 +3898,15 @@ export default function Sidebar() {
                               />
                             </span>
                             <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
+                            {/* The same marker a pinned thread row carries: same glyph, same
+                                size, same muted tone. */}
+                            {isPinnedProject ? (
+                              <PinIcon
+                                aria-label="Pinned"
+                                role="img"
+                                className="size-3 shrink-0 text-muted-foreground/65"
+                              />
+                            ) : null}
                             {/* Same glyphs and hues the thread rows use for Working
                             and Done, so the lane reads as a summary of the rows
                             behind it rather than as its own vocabulary. */}
@@ -3873,35 +3918,6 @@ export default function Sidebar() {
                               projectName={project.displayName}
                             />
                           </SidebarMenuButton>
-                          {/* Pin sits in the flow rather than over the label, so
-                          revealing it on hover cannot shift or cover the name.
-                          A pinned row keeps it visible: that is the state. */}
-                          <Button
-                            size="icon-xs"
-                            variant="ghost-muted"
-                            aria-label={
-                              isPinnedProject
-                                ? `Unpin ${project.displayName}`
-                                : `Pin ${project.displayName}`
-                            }
-                            title={isPinnedProject ? "Unpin project" : "Pin project"}
-                            aria-pressed={isPinnedProject}
-                            className={cn(
-                              "size-6 shrink-0 [--control-icon-color:currentColor]",
-                              isPinnedProject
-                                ? "text-sidebar-foreground"
-                                : "text-icon-muted opacity-0 transition-opacity group-hover/lane-row:opacity-100 focus-visible:opacity-100",
-                            )}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              toggleProjectPin(project.projectKey);
-                            }}
-                          >
-                            <PinIcon
-                              className={cn("size-3.5", isPinnedProject && "fill-current")}
-                            />
-                          </Button>
                           <Button
                             size="icon-xs"
                             variant="ghost-muted"
