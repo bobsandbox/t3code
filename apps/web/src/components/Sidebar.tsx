@@ -3760,46 +3760,41 @@ export default function Sidebar() {
                     )}
                   />
                 </SidebarMenuButton>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <SidebarMenuButton
-                        size="icon"
-                        className="relative size-7 shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                        onClick={openAddProjectCommandPalette}
-                        type="button"
-                        aria-label="New project"
-                      />
-                    }
-                  >
-                    <FolderPlusIcon />
-                    <span
-                      className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
-                      aria-hidden="true"
-                    />
-                  </TooltipTrigger>
-                  <TooltipPopup side="right">New project</TooltipPopup>
-                </Tooltip>
               </div>
             ) : null}
-            {/* Inside a project. Everything below this rule acts on the project
-                the sidebar is scoped to, which is why it appears and disappears
-                with the scope and why its glyph carries the project's colour.
-                Today that is one action; the row exists to hold the rest. */}
-            {scopedProjectGroup ? (
+            {/* One action row under the picker, holding whatever the current
+                level can do. Scoped to a project it acts on that project and
+                its glyph carries the project's colour; at All projects it acts
+                on the list itself. New project used to be an icon pinned
+                beside the picker, where it was equally offered inside a
+                project — the level it does not belong to. Room is left here on
+                purpose for the functions that come next. */}
+            {projectGroups.length > 0 ? (
               <div className="mt-1 flex items-center gap-1 border-sidebar-border/60 border-t pt-1.5">
-                <SidebarMenuButton
-                  type="button"
-                  onClick={handleNewThreadInScopedProject}
-                  aria-label={`New thread in ${scopedProjectGroup.displayName}`}
-                  style={projectColorStyle(scopedProjectGroup.displayName)}
-                  className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] text-[0.8125rem] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                >
-                  <SquarePenIcon className="size-4 shrink-0 text-[color:var(--project-color,var(--sidebar-icon-color))]" />
-                  <span className="min-w-0 flex-1 truncate">
-                    New thread in {scopedProjectGroup.displayName}
-                  </span>
-                </SidebarMenuButton>
+                {scopedProjectGroup ? (
+                  <SidebarMenuButton
+                    type="button"
+                    onClick={handleNewThreadInScopedProject}
+                    aria-label={`New thread in ${scopedProjectGroup.displayName}`}
+                    style={projectColorStyle(scopedProjectGroup.displayName)}
+                    className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] text-[0.8125rem] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                  >
+                    <SquarePenIcon className="size-4 shrink-0 text-[color:var(--project-color,var(--sidebar-icon-color))]" />
+                    <span className="min-w-0 flex-1 truncate">
+                      New thread in {scopedProjectGroup.displayName}
+                    </span>
+                  </SidebarMenuButton>
+                ) : (
+                  <SidebarMenuButton
+                    type="button"
+                    onClick={openAddProjectCommandPalette}
+                    aria-label="New project"
+                    className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] text-[0.8125rem] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                  >
+                    <FolderPlusIcon className="size-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">New project</span>
+                  </SidebarMenuButton>
+                )}
               </div>
             ) : null}
           </SidebarGroup>
