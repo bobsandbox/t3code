@@ -3598,6 +3598,18 @@ export default function Sidebar() {
     [isMobile, newThreadContext, projectGroups.length, setOpenMobile],
   );
 
+  // The standard new-thread button is left exactly as upstream ships it: in a
+  // multi-project setup it opens the picker. This is the second button, and it
+  // only exists while the sidebar is scoped to a project — then the answer to
+  // "which project" is already on screen, so it skips the picker entirely.
+  const handleNewThreadInScopedProject = useCallback(() => {
+    if (scopedProjectGroup === null) return;
+    if (isMobile) setOpenMobile(false);
+    void newThreadContext.handleNewThread(
+      scopeProjectRef(scopedProjectGroup.environmentId, scopedProjectGroup.id),
+    );
+  }, [isMobile, newThreadContext, scopedProjectGroup, setOpenMobile]);
+
   // The button mirrors chat.new: in multi-project setups both route through
   // the command palette's "New thread in..." picker, and in single-project
   // setups both create immediately. In multi-project setups the label is only
@@ -3768,6 +3780,26 @@ export default function Sidebar() {
                   </TooltipTrigger>
                   <TooltipPopup side="right">New project</TooltipPopup>
                 </Tooltip>
+              </div>
+            ) : null}
+            {/* Inside a project. Everything below this rule acts on the project
+                the sidebar is scoped to, which is why it appears and disappears
+                with the scope and why its glyph carries the project's colour.
+                Today that is one action; the row exists to hold the rest. */}
+            {scopedProjectGroup ? (
+              <div className="mt-1 flex items-center gap-1 border-sidebar-border/60 border-t pt-1.5">
+                <SidebarMenuButton
+                  type="button"
+                  onClick={handleNewThreadInScopedProject}
+                  aria-label={`New thread in ${scopedProjectGroup.displayName}`}
+                  style={projectColorStyle(scopedProjectGroup.displayName)}
+                  className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] text-[0.8125rem] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                >
+                  <SquarePenIcon className="size-4 shrink-0 text-[color:var(--project-color,var(--sidebar-icon-color))]" />
+                  <span className="min-w-0 flex-1 truncate">
+                    New thread in {scopedProjectGroup.displayName}
+                  </span>
+                </SidebarMenuButton>
               </div>
             ) : null}
           </SidebarGroup>
