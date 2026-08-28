@@ -466,7 +466,7 @@ type SortablePinnedRowBag = Pick<
   "listeners" | "setNodeRef" | "transform" | "transition" | "isDragging"
 >;
 
-function SortablePinnedThreadRow(props: {
+function SortablePinnedRow(props: {
   id: string;
   children: (bag: SortablePinnedRowBag) => ReactNode;
 }) {
@@ -2248,9 +2248,29 @@ export default function Sidebar() {
       ),
     [pinnedProjectKeys, projectActivityByKey, projectGroups, projectLaneSort],
   );
-  const pinnedLaneProjectCount = useMemo(
-    () => laneProjects.filter((project) => pinnedProjectKeys.includes(project.projectKey)).length,
+  const pinnedLaneProjects = useMemo(
+    () => laneProjects.filter((project) => pinnedProjectKeys.includes(project.projectKey)),
     [laneProjects, pinnedProjectKeys],
+  );
+  const unpinnedLaneProjects = useMemo(
+    () => laneProjects.filter((project) => !pinnedProjectKeys.includes(project.projectKey)),
+    [laneProjects, pinnedProjectKeys],
+  );
+  // Reorder by key rather than by displayed index: the stored list can hold
+  // keys for projects that are not on screen (removed, or on an environment
+  // that is offline), and indexing the rendered rows would move the wrong one.
+  const handlePinnedProjectDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const overId = event.over?.id;
+      if (overId === undefined || overId === event.active.id) return;
+      setPinnedProjectKeys((keys) => {
+        const fromIndex = keys.indexOf(String(event.active.id));
+        const toIndex = keys.indexOf(String(overId));
+        if (fromIndex < 0 || toIndex < 0) return keys;
+        return arrayMove([...keys], fromIndex, toIndex);
+      });
+    },
+    [setPinnedProjectKeys],
   );
 
   const threadSearchResults = useMemo(
@@ -3796,91 +3816,139 @@ export default function Sidebar() {
                       <span className="min-w-0 flex-1 truncate">All projects</span>
                     </SidebarMenuButton>
                   </li>
-                  {laneProjects.map((project, index) => {
-                    const isPinnedProject = pinnedProjectKeys.includes(project.projectKey);
-                    return (
-                      <li
-                        key={project.projectKey}
-                        className={cn(
-                          "group/lane-row relative flex items-center gap-0.5",
-                          // The pinned block ends here: same rule the thread list
-                          // draws under its pinned rows, so the two read alike.
-                          index === pinnedLaneProjectCount - 1 &&
-                            index < laneProjects.length - 1 &&
-                            "mb-2 border-sidebar-muted-foreground/45 border-b pb-2",
-                        )}
-                      >
-                        <SidebarMenuButton
-                          type="button"
-                          onClick={() => selectProjectScope(project.projectKey)}
-                          data-active={projectScopeKey === project.projectKey}
-                          className="h-7 min-w-0 flex-1 text-[0.8125rem]"
+                  {(() => {
+                    // Pinned rows are the only draggable ones: below the divider
+                    // the order belongs to the sort control, and a drag there
+                    // would be silently undone by the next activity change.
+                    const renderLaneProjectRow = (
+                      project: SidebarProjectSnapshot,
+                      sortable?: SortablePinnedRowBag,
+                    ) => {
+                      const isPinnedProject = pinnedProjectKeys.includes(project.projectKey);
+                      return (
+                        <li
+                          key={project.projectKey}
+                          ref={sortable?.setNodeRef}
+                          style={
+                            sortable
+                              ? {
+                                  transform: CSS.Translate.toString(sortable.transform),
+                                  transition: sortable.transition,
+                                }
+                              : undefined
+                          }
+                          {...(sortable?.listeners ?? {})}
+                          className={cn(
+                            "group/lane-row relative flex items-center gap-0.5",
+                            sortable && "touch-none",
+                            sortable?.isDragging && "z-20 opacity-80",
+                          )}
                         >
-                          <span
-                            style={projectColorStyle(project.displayName)}
-                            className="flex shrink-0 items-center text-[color:var(--project-color,var(--sidebar-icon-color))]"
+                          <SidebarMenuButton
+                            type="button"
+                            onClick={() => selectProjectScope(project.projectKey)}
+                            data-active={projectScopeKey === project.projectKey}
+                            className="h-7 min-w-0 flex-1 text-[0.8125rem]"
                           >
-                            <ProjectFavicon
-                              environmentId={project.environmentId}
-                              cwd={project.workspaceRoot}
-                              faviconPath={project.faviconPath}
-                              className="size-4 shrink-0 text-current"
-                            />
-                          </span>
-                          <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
-                          {/* Same glyphs and hues the thread rows use for Working
+                            <span
+                              style={projectColorStyle(project.displayName)}
+                              className="flex shrink-0 items-center text-[color:var(--project-color,var(--sidebar-icon-color))]"
+                            >
+                              <ProjectFavicon
+                                environmentId={project.environmentId}
+                                cwd={project.workspaceRoot}
+                                faviconPath={project.faviconPath}
+                                className="size-4 shrink-0 text-current"
+                              />
+                            </span>
+                            <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
+                            {/* Same glyphs and hues the thread rows use for Working
                             and Done, so the lane reads as a summary of the rows
                             behind it rather than as its own vocabulary. */}
-                          <SidebarProjectActivityBadges
-                            activity={sidebarProjectActivityOf(
-                              projectActivityByKey,
-                              project.projectKey,
-                            )}
-                            projectName={project.displayName}
-                          />
-                        </SidebarMenuButton>
-                        {/* Pin sits in the flow rather than over the label, so
+                            <SidebarProjectActivityBadges
+                              activity={sidebarProjectActivityOf(
+                                projectActivityByKey,
+                                project.projectKey,
+                              )}
+                              projectName={project.displayName}
+                            />
+                          </SidebarMenuButton>
+                          {/* Pin sits in the flow rather than over the label, so
                           revealing it on hover cannot shift or cover the name.
                           A pinned row keeps it visible: that is the state. */}
-                        <Button
-                          size="icon-xs"
-                          variant="ghost-muted"
-                          aria-label={
-                            isPinnedProject
-                              ? `Unpin ${project.displayName}`
-                              : `Pin ${project.displayName}`
-                          }
-                          title={isPinnedProject ? "Unpin project" : "Pin project"}
-                          aria-pressed={isPinnedProject}
-                          className={cn(
-                            "size-6 shrink-0 [--control-icon-color:currentColor]",
-                            isPinnedProject
-                              ? "text-sidebar-foreground"
-                              : "text-icon-muted opacity-0 transition-opacity group-hover/lane-row:opacity-100 focus-visible:opacity-100",
-                          )}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            toggleProjectPin(project.projectKey);
-                          }}
-                        >
-                          <PinIcon className={cn("size-3.5", isPinnedProject && "fill-current")} />
-                        </Button>
-                        <Button
-                          size="icon-xs"
-                          variant="ghost-muted"
-                          aria-label={`Project settings for ${project.displayName}`}
-                          title={`Project settings for ${project.displayName}`}
-                          className="size-6 shrink-0 [--control-icon-color:currentColor] text-icon-muted"
-                          onClick={(event) => {
-                            void handleProjectSettings(event, project);
-                          }}
-                        >
-                          <SettingsIcon className="size-3.5" />
-                        </Button>
-                      </li>
+                          <Button
+                            size="icon-xs"
+                            variant="ghost-muted"
+                            aria-label={
+                              isPinnedProject
+                                ? `Unpin ${project.displayName}`
+                                : `Pin ${project.displayName}`
+                            }
+                            title={isPinnedProject ? "Unpin project" : "Pin project"}
+                            aria-pressed={isPinnedProject}
+                            className={cn(
+                              "size-6 shrink-0 [--control-icon-color:currentColor]",
+                              isPinnedProject
+                                ? "text-sidebar-foreground"
+                                : "text-icon-muted opacity-0 transition-opacity group-hover/lane-row:opacity-100 focus-visible:opacity-100",
+                            )}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              toggleProjectPin(project.projectKey);
+                            }}
+                          >
+                            <PinIcon
+                              className={cn("size-3.5", isPinnedProject && "fill-current")}
+                            />
+                          </Button>
+                          <Button
+                            size="icon-xs"
+                            variant="ghost-muted"
+                            aria-label={`Project settings for ${project.displayName}`}
+                            title={`Project settings for ${project.displayName}`}
+                            className="size-6 shrink-0 [--control-icon-color:currentColor] text-icon-muted"
+                            onClick={(event) => {
+                              void handleProjectSettings(event, project);
+                            }}
+                          >
+                            <SettingsIcon className="size-3.5" />
+                          </Button>
+                        </li>
+                      );
+                    };
+                    return (
+                      <>
+                        {pinnedLaneProjects.length > 0 ? (
+                          <DndContext
+                            sensors={pinnedDndSensors}
+                            collisionDetection={closestCenter}
+                            modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
+                            onDragEnd={handlePinnedProjectDragEnd}
+                          >
+                            <SortableContext
+                              items={pinnedLaneProjects.map((project) => project.projectKey)}
+                              strategy={verticalListSortingStrategy}
+                            >
+                              {pinnedLaneProjects.map((project) => (
+                                <SortablePinnedRow key={project.projectKey} id={project.projectKey}>
+                                  {(bag) => renderLaneProjectRow(project, bag)}
+                                </SortablePinnedRow>
+                              ))}
+                            </SortableContext>
+                          </DndContext>
+                        ) : null}
+                        {pinnedLaneProjects.length > 0 && unpinnedLaneProjects.length > 0 ? (
+                          <li
+                            aria-hidden
+                            data-testid="sidebar-pinned-projects-divider"
+                            className="mx-2 my-2 h-px list-none bg-sidebar-muted-foreground/45"
+                          />
+                        ) : null}
+                        {unpinnedLaneProjects.map((project) => renderLaneProjectRow(project))}
+                      </>
                     );
-                  })}
+                  })()}
                 </ul>
               </div>
               <div
@@ -4162,9 +4230,9 @@ export default function Sidebar() {
                                         return renderThreadRow(thread, "pinned");
                                       }
                                       return (
-                                        <SortablePinnedThreadRow key={threadKey} id={threadKey}>
+                                        <SortablePinnedRow key={threadKey} id={threadKey}>
                                           {(bag) => renderThreadRow(thread, "pinned", bag)}
-                                        </SortablePinnedThreadRow>
+                                        </SortablePinnedRow>
                                       );
                                     })}
                                   </ul>
