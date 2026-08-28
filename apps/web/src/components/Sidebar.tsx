@@ -35,6 +35,7 @@ import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
+  ArrowDownUpIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
@@ -74,6 +75,7 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
 import { isElectron } from "../env";
 import {
   resolveShortcutCommand,
@@ -139,6 +141,10 @@ import {
   resolveSidebarThreadStatus,
   searchSidebarProjectsByName,
   searchSidebarThreadsByTitle,
+  type SidebarProjectActivitySummary,
+  sidebarProjectActivityOf,
+  sortSidebarLaneProjects,
+  summarizeSidebarProjectActivity,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
   sortLogicalProjectsForSidebar,
@@ -199,6 +205,11 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 // Keep the v2 key so existing preferences survive the v2-to-default rename.
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar-v2:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar-v2:snoozed-expanded";
+const PROJECT_LANE_SORT_KEY = "t3code:sidebar:project-lane-sort";
+// Local, not a server setting: `sidebarProjectSortOrder` has no alphabetical
+// member and also drives thread grouping, so reusing it would answer a
+// different question and require a contract change on the server.
+const ProjectLaneSortSchema = Schema.Literals(["activity", "alphabetical"]);
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "now";
@@ -694,6 +705,39 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     </>
   );
 });
+
+/** The two counts a project lane row can carry. Rendered only when non-zero:
+    a row of grey zeroes would make twenty quiet projects look busy. The count
+    is dropped for a single thread — the glyph already says "one running". */
+function SidebarProjectActivityBadges(props: {
+  activity: SidebarProjectActivitySummary;
+  projectName: string;
+}) {
+  const { done, working } = props.activity;
+  if (working === 0 && done === 0) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 text-[0.6875rem] tabular-nums">
+      {working > 0 ? (
+        <span
+          className="inline-flex items-center gap-0.5 text-sky-600 dark:text-sky-400"
+          aria-label={`${String(working)} working in ${props.projectName}`}
+        >
+          <CircleDashedIcon aria-hidden className="size-3.5 shrink-0" />
+          {working > 1 ? working : null}
+        </span>
+      ) : null}
+      {done > 0 ? (
+        <span
+          className="inline-flex items-center gap-0.5 text-emerald-700 dark:text-emerald-300"
+          aria-label={`${String(done)} done in ${props.projectName}`}
+        >
+          <CircleCheckIcon aria-hidden className="size-3.5 shrink-0" />
+          {done > 1 ? done : null}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
@@ -2147,6 +2191,42 @@ export default function Sidebar() {
     () => [...pinnedThreads, ...activeThreads, ...snoozedThreads, ...settledThreads],
     [activeThreads, pinnedThreads, settledThreads, snoozedThreads],
   );
+  const [projectLaneSort, setProjectLaneSort] = useLocalStorage(
+    PROJECT_LANE_SORT_KEY,
+    "activity" as const as "activity" | "alphabetical",
+    ProjectLaneSortSchema,
+  );
+  const threadLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
+  const logicalProjectKeyByThreadProjectKey = useMemo(
+    () =>
+      new Map(
+        projectGroups.flatMap((group) =>
+          group.memberProjects.map(
+            (project) => [`${project.environmentId}:${project.id}`, group.projectKey] as const,
+          ),
+        ),
+      ),
+    [projectGroups],
+  );
+  // Pinned and active only: a snoozed or settled thread is parked on purpose
+  // and must not light its project up as if it needed attention.
+  const projectActivityByKey = useMemo(
+    () =>
+      summarizeSidebarProjectActivity({
+        threads: [...pinnedThreads, ...activeThreads],
+        projectKeyOf: (thread) =>
+          logicalProjectKeyByThreadProjectKey.get(`${thread.environmentId}:${thread.projectId}`) ??
+          null,
+        lastVisitedAtOf: (thread) =>
+          threadLastVisitedAtById[scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))],
+      }),
+    [activeThreads, logicalProjectKeyByThreadProjectKey, pinnedThreads, threadLastVisitedAtById],
+  );
+  const laneProjects = useMemo(
+    () => sortSidebarLaneProjects(projectGroups, projectLaneSort, projectActivityByKey),
+    [projectActivityByKey, projectGroups, projectLaneSort],
+  );
+
   const threadSearchResults = useMemo(
     () => searchSidebarThreadsByTitle(searchableThreads, threadSearchQuery),
     [searchableThreads, threadSearchQuery],
@@ -3642,6 +3722,42 @@ export default function Sidebar() {
                   !projectPanelOpen && !projectPanelSliding && "h-0 overflow-hidden",
                 )}
               >
+                <div className="flex items-center gap-1 pb-0.5 ps-2 pe-1">
+                  <span className="min-w-0 flex-1 truncate text-[0.6875rem] font-medium uppercase tracking-wide text-sidebar-muted-foreground">
+                    Projects
+                  </span>
+                  <Menu>
+                    <MenuTrigger
+                      render={
+                        <Button
+                          size="icon-xs"
+                          variant="ghost-muted"
+                          type="button"
+                          aria-label="Sort projects"
+                          title="Sort projects"
+                          className="size-6 [--control-icon-color:currentColor] text-icon-muted"
+                        />
+                      }
+                    >
+                      <ArrowDownUpIcon className="size-3.5" />
+                    </MenuTrigger>
+                    <MenuPopup align="end">
+                      <MenuRadioGroup
+                        value={projectLaneSort}
+                        onValueChange={(value) =>
+                          setProjectLaneSort(value === "alphabetical" ? "alphabetical" : "activity")
+                        }
+                      >
+                        <MenuRadioItem value="activity" closeOnClick className="text-sm">
+                          Recent activity
+                        </MenuRadioItem>
+                        <MenuRadioItem value="alphabetical" closeOnClick className="text-sm">
+                          Alphabetical
+                        </MenuRadioItem>
+                      </MenuRadioGroup>
+                    </MenuPopup>
+                  </Menu>
+                </div>
                 <ul role="list" className="flex flex-col gap-px">
                   <li>
                     <SidebarMenuButton
@@ -3654,7 +3770,7 @@ export default function Sidebar() {
                       <span className="min-w-0 flex-1 truncate">All projects</span>
                     </SidebarMenuButton>
                   </li>
-                  {projectGroups.map((project) => (
+                  {laneProjects.map((project) => (
                     <li key={project.projectKey} className="relative flex items-center">
                       <SidebarMenuButton
                         type="button"
@@ -3674,6 +3790,16 @@ export default function Sidebar() {
                           />
                         </span>
                         <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
+                        {/* Same glyphs and hues the thread rows use for Working
+                            and Done, so the lane reads as a summary of the rows
+                            behind it rather than as its own vocabulary. */}
+                        <SidebarProjectActivityBadges
+                          activity={sidebarProjectActivityOf(
+                            projectActivityByKey,
+                            project.projectKey,
+                          )}
+                          projectName={project.displayName}
+                        />
                       </SidebarMenuButton>
                       <Button
                         size="icon-xs"

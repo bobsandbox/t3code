@@ -24,6 +24,9 @@ import {
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
   searchSidebarProjectsByName,
+  sidebarProjectActivityOf,
+  sortSidebarLaneProjects,
+  summarizeSidebarProjectActivity,
   searchSidebarThreadsByTitle,
   formatWorkingDurationLabel,
   shouldNavigateAfterProjectRemoval,
@@ -781,6 +784,116 @@ describe("searchSidebarThreadsByTitle", () => {
 
   it("returns no results for an empty query", () => {
     expect(searchSidebarThreadsByTitle(threads, "   ")).toEqual([]);
+  });
+});
+
+describe("summarizeSidebarProjectActivity", () => {
+  const thread = (id: string, projectKey: string, overrides: Record<string, unknown> = {}): never =>
+    ({
+      id,
+      projectKey,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+      interactionMode: null,
+      session: null,
+      backgroundLiveness: null,
+      latestTurn: null,
+      latestUserMessageAt: null,
+      settledAt: null,
+      updatedAt: "2026-08-28T10:00:00.000Z",
+      ...overrides,
+    }) as never;
+
+  const summarize = (threads: readonly never[], visits: Record<string, string> = {}) =>
+    summarizeSidebarProjectActivity({
+      threads,
+      projectKeyOf: (candidate: { projectKey: string }) => candidate.projectKey,
+      lastVisitedAtOf: (candidate: { id: string }) => visits[candidate.id],
+    });
+
+  it("counts running sessions and unread completions per project", () => {
+    const summaries = summarize(
+      [
+        thread("t1", "alpha", { session: { status: "running" } }),
+        thread("t2", "alpha", {
+          latestTurn: { completedAt: "2026-08-28T11:00:00.000Z" },
+        }),
+        thread("t3", "beta", { backgroundLiveness: "working" }),
+      ],
+      { t2: "2026-08-28T09:00:00.000Z" },
+    );
+
+    expect(sidebarProjectActivityOf(summaries, "alpha")).toMatchObject({ working: 1, done: 1 });
+    expect(sidebarProjectActivityOf(summaries, "beta")).toMatchObject({ working: 1, done: 0 });
+  });
+
+  it("does not double-count a thread that finished and is running again", () => {
+    const summaries = summarize(
+      [
+        thread("t1", "alpha", {
+          session: { status: "running" },
+          latestTurn: { completedAt: "2026-08-28T11:00:00.000Z" },
+        }),
+      ],
+      { t1: "2026-08-28T09:00:00.000Z" },
+    );
+
+    expect(sidebarProjectActivityOf(summaries, "alpha")).toMatchObject({ working: 1, done: 0 });
+  });
+
+  it("treats a never-visited thread as read, matching the thread rows", () => {
+    const summaries = summarize([
+      thread("t1", "alpha", { latestTurn: { completedAt: "2026-08-28T11:00:00.000Z" } }),
+    ]);
+
+    expect(sidebarProjectActivityOf(summaries, "alpha").done).toBe(0);
+  });
+
+  it("reports the newest activity and an empty summary for unknown projects", () => {
+    const summaries = summarize([
+      thread("t1", "alpha", { updatedAt: "2026-08-28T10:00:00.000Z" }),
+      thread("t2", "alpha", { latestUserMessageAt: "2026-08-28T12:00:00.000Z" }),
+    ]);
+
+    expect(sidebarProjectActivityOf(summaries, "alpha").lastActivityMs).toBe(
+      Date.parse("2026-08-28T12:00:00.000Z"),
+    );
+    expect(sidebarProjectActivityOf(summaries, "nope")).toEqual({
+      working: 0,
+      done: 0,
+      lastActivityMs: 0,
+    });
+  });
+});
+
+describe("sortSidebarLaneProjects", () => {
+  const projects = [
+    { projectKey: "beta", displayName: "beta" },
+    { projectKey: "alpha", displayName: "Alpha" },
+    { projectKey: "quiet", displayName: "quiet" },
+  ];
+  const activity = new Map([
+    ["beta", { working: 0, done: 0, lastActivityMs: 200 }],
+    ["alpha", { working: 0, done: 0, lastActivityMs: 300 }],
+  ]);
+
+  it("orders by newest activity first and sinks projects with none", () => {
+    expect(
+      sortSidebarLaneProjects(projects, "activity", activity).map((p) => p.projectKey),
+    ).toEqual(["alpha", "beta", "quiet"]);
+  });
+
+  it("orders alphabetically regardless of case", () => {
+    expect(
+      sortSidebarLaneProjects(projects, "alphabetical", activity).map((p) => p.projectKey),
+    ).toEqual(["alpha", "beta", "quiet"]);
+  });
+
+  it("does not mutate the input", () => {
+    const input = [...projects];
+    sortSidebarLaneProjects(input, "alphabetical", activity);
+    expect(input.map((p) => p.projectKey)).toEqual(["beta", "alpha", "quiet"]);
   });
 });
 

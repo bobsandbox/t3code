@@ -506,6 +506,100 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   return "ready";
 }
 
+export interface SidebarProjectActivitySummary {
+  /** Threads whose session is live right now, or whose background work is. */
+  readonly working: number;
+  /** Threads that finished something the user has not looked at yet — the same
+      "Done" the thread row shows, so the two never disagree. */
+  readonly done: number;
+  /** Newest activity in the project, for the activity sort. 0 when the project
+      has no threads at all, which parks empty projects at the bottom. */
+  readonly lastActivityMs: number;
+}
+
+const EMPTY_PROJECT_ACTIVITY: SidebarProjectActivitySummary = {
+  working: 0,
+  done: 0,
+  lastActivityMs: 0,
+};
+
+/** Rolls the thread rows of a project up into the two signals its lane row can
+    show at a glance: is anything running, and is anything waiting to be read.
+    Deliberately reuses resolveSidebarThreadStatus and hasUnseenCompletion
+    rather than re-deriving them, so a project badge can never claim something
+    the rows underneath it contradict.
+
+    Callers pass only the threads they consider current (pinned and active):
+    a snoozed or settled thread is parked on purpose and must not pull its
+    project back into the "needs you" state. */
+export function summarizeSidebarProjectActivity<
+  T extends SidebarThreadStatusInput & ThreadStatusInput & SettledTimestampInput,
+>(input: {
+  readonly threads: readonly T[];
+  readonly projectKeyOf: (thread: T) => string | null;
+  readonly lastVisitedAtOf: (thread: T) => string | undefined;
+}): Map<string, SidebarProjectActivitySummary> {
+  const summaries = new Map<string, SidebarProjectActivitySummary>();
+  for (const thread of input.threads) {
+    const projectKey = input.projectKeyOf(thread);
+    if (projectKey === null) continue;
+    const current = summaries.get(projectKey) ?? EMPTY_PROJECT_ACTIVITY;
+    const status = resolveSidebarThreadStatus(thread);
+    const isDone = hasUnseenCompletion({
+      ...thread,
+      lastVisitedAt: input.lastVisitedAtOf(thread),
+    });
+    summaries.set(projectKey, {
+      working: current.working + (status === "working" ? 1 : 0),
+      // Working outranks done on the same thread: a thread that completed a
+      // turn and is already running again is running, not waiting.
+      done: current.done + (isDone && status !== "working" ? 1 : 0),
+      lastActivityMs: Math.max(
+        current.lastActivityMs,
+        firstValidTimestampMs(
+          thread.latestUserMessageAt,
+          thread.latestTurn?.completedAt,
+          thread.latestTurn?.startedAt,
+          thread.latestTurn?.requestedAt,
+          thread.updatedAt,
+        ),
+      ),
+    });
+  }
+  return summaries;
+}
+
+export type SidebarProjectLaneSort = "activity" | "alphabetical";
+
+/** The lane's own ordering, independent of the server-side project sort
+    setting: that one also drives the thread grouping and offers "manual",
+    which is not a useful answer to "where is the project I touched last".
+    Empty projects sort last under activity — a project with nothing running
+    has nothing to rank. */
+export function sortSidebarLaneProjects<
+  T extends { readonly projectKey: string; readonly displayName: string },
+>(
+  projects: readonly T[],
+  sort: SidebarProjectLaneSort,
+  activity: ReadonlyMap<string, SidebarProjectActivitySummary>,
+): T[] {
+  const byName = (left: T, right: T) =>
+    left.displayName.localeCompare(right.displayName, undefined, { sensitivity: "base" });
+  if (sort === "alphabetical") return [...projects].sort(byName);
+  return [...projects].sort((left, right) => {
+    const leftActivity = sidebarProjectActivityOf(activity, left.projectKey).lastActivityMs;
+    const rightActivity = sidebarProjectActivityOf(activity, right.projectKey).lastActivityMs;
+    return rightActivity - leftActivity || byName(left, right);
+  });
+}
+
+export function sidebarProjectActivityOf(
+  summaries: ReadonlyMap<string, SidebarProjectActivitySummary>,
+  projectKey: string,
+): SidebarProjectActivitySummary {
+  return summaries.get(projectKey) ?? EMPTY_PROJECT_ACTIVITY;
+}
+
 /** NaN-safe Date.parse for sort comparators: a malformed timestamp must not
     poison the whole ordering, so it sinks to the epoch instead. */
 export function parseTimestampMs(isoDate: string): number {
