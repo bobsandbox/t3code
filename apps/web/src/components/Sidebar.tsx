@@ -1181,12 +1181,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onBlur={handleRenameBlur}
       onClick={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
-      className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm font-medium text-card-foreground outline-none focus:border-foreground"
+      className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-[0.8125rem] font-medium text-card-foreground outline-none focus:border-foreground"
     />
   ) : (
     <span
       className={cn(
-        "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
+        "min-w-0 flex-1 text-[0.8125rem] transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
         variant === "card"
           ? cn(
@@ -3636,7 +3636,7 @@ export default function Sidebar() {
                   aria-label="Browse projects"
                   aria-expanded={projectPanelOpen}
                   onClick={() => toggleProjectPanel(!projectPanelOpen)}
-                  className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                  className="h-7 min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] text-[0.8125rem] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                 >
                   {scopedProjectGroup ? (
                     <span
@@ -3672,7 +3672,7 @@ export default function Sidebar() {
                     render={
                       <SidebarMenuButton
                         size="icon"
-                        className="relative shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                        className="relative size-7 shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                         onClick={openAddProjectCommandPalette}
                         type="button"
                         aria-label="New project"
@@ -3764,7 +3764,7 @@ export default function Sidebar() {
                       type="button"
                       onClick={() => selectProjectScope(null)}
                       data-active={projectScopeKey === null}
-                      className="w-full min-w-0"
+                      className="h-7 w-full min-w-0 text-[0.8125rem]"
                     >
                       <FolderIcon className="size-4 shrink-0" />
                       <span className="min-w-0 flex-1 truncate">All projects</span>
@@ -3776,7 +3776,7 @@ export default function Sidebar() {
                         type="button"
                         onClick={() => selectProjectScope(project.projectKey)}
                         data-active={projectScopeKey === project.projectKey}
-                        className="w-full min-w-0 pe-8"
+                        className="h-7 w-full min-w-0 pe-8 text-[0.8125rem]"
                       >
                         <span
                           style={projectColorStyle(project.displayName)}
