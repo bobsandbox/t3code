@@ -39,6 +39,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
@@ -3728,43 +3729,46 @@ export default function Sidebar() {
                 </Tooltip>
               </div>
             </div>
-            {projectGroups.length > 0 ? (
+            {/* Only while the lane is closed. With the list on screen this row
+                would name a level you are already looking at, and the lane
+                carries its own PROJECTS header. Inside a project it is the way
+                back up; at the top level it is the way in. */}
+            {projectGroups.length > 0 && !projectPanelOpen ? (
               <div className="flex items-center gap-1">
                 <SidebarMenuButton
                   type="button"
-                  aria-label="Browse projects"
-                  aria-expanded={projectPanelOpen}
-                  onClick={() => toggleProjectPanel(!projectPanelOpen)}
+                  aria-label={scopedProjectGroup ? "Back to all projects" : "Browse projects"}
+                  onClick={() => toggleProjectPanel(true)}
                   className="h-7 min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] text-[0.8125rem] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                 >
                   {scopedProjectGroup ? (
-                    <span
-                      style={projectColorStyle(scopedProjectGroup.displayName)}
-                      className="flex shrink-0 items-center text-[color:var(--project-color,var(--sidebar-icon-color))]"
-                    >
-                      <ProjectFavicon
-                        environmentId={scopedProjectGroup.environmentId}
-                        cwd={scopedProjectGroup.workspaceRoot}
-                        faviconPath={scopedProjectGroup.faviconPath}
-                        className="size-4 shrink-0 text-current"
-                      />
-                    </span>
+                    <>
+                      {/* Chevron first, pointing at the list it goes back to:
+                          the row is an exit from the project, and the project's
+                          own name is what it is exiting. */}
+                      <ChevronLeftIcon aria-hidden className="-ms-px size-4 shrink-0" />
+                      <span
+                        style={projectColorStyle(scopedProjectGroup.displayName)}
+                        className="flex shrink-0 items-center text-[color:var(--project-color,var(--sidebar-icon-color))]"
+                      >
+                        <ProjectFavicon
+                          environmentId={scopedProjectGroup.environmentId}
+                          cwd={scopedProjectGroup.workspaceRoot}
+                          faviconPath={scopedProjectGroup.faviconPath}
+                          className="size-4 shrink-0 text-current"
+                        />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">
+                        {scopedProjectGroup.displayName}
+                      </span>
+                    </>
                   ) : (
-                    <FolderIcon className="size-4 shrink-0" />
+                    <>
+                      <FolderIcon className="size-4 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">All projects</span>
+                      <ChevronRightIcon aria-hidden className="-me-px size-4 shrink-0" />
+                    </>
                   )}
-                  <span className="min-w-0 flex-1 truncate">
-                    {scopedProjectGroup?.displayName ?? "All projects"}
-                  </span>
-                  {/* Points at the lane it opens: left while the projects are
-                      parked off-screen, right once they have slid in and the
-                      threads are the thing waiting to come back. */}
-                  <ChevronLeftIcon
-                    aria-hidden
-                    className={cn(
-                      "-mr-px size-4 shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none",
-                      projectPanelOpen && "rotate-180",
-                    )}
-                  />
                 </SidebarMenuButton>
               </div>
             ) : null}
