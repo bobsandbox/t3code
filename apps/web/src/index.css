@@ -112,7 +112,37 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --workspace-titlebar-control-size: 1.75rem;
   --workspace-titlebar-control-gap: 0.75rem;
 
+  /*
+   * Project palette. `projectColor.ts` hashes a project name to one of these
+   * twelve indexes; nothing else picks a colour, so a project looks the same
+   * everywhere it appears.
+   *
+   * The 60-115 band (mustard, olive) is skipped: at this lightness those hues
+   * read as dirty rather than as a colour, on either appearance. The ring is
+   * correspondingly denser through the greens and blues, where hue steps of
+   * 20-25 degrees still separate cleanly.
+   *
+   * Only lightness and chroma change between appearances. On a light sidebar
+   * the tint has to hold its own against near-white; on a dark one the same
+   * chroma turns fluorescent, so it lifts in lightness and drops in saturation.
+   */
+  --project-tint-l: 0.55;
+  --project-tint-c: 0.15;
+  --project-color-0: oklch(var(--project-tint-l) var(--project-tint-c) 20);
+  --project-color-1: oklch(var(--project-tint-l) var(--project-tint-c) 45);
+  --project-color-2: oklch(var(--project-tint-l) var(--project-tint-c) 130);
+  --project-color-3: oklch(var(--project-tint-l) var(--project-tint-c) 155);
+  --project-color-4: oklch(var(--project-tint-l) var(--project-tint-c) 175);
+  --project-color-5: oklch(var(--project-tint-l) var(--project-tint-c) 195);
+  --project-color-6: oklch(var(--project-tint-l) var(--project-tint-c) 215);
+  --project-color-7: oklch(var(--project-tint-l) var(--project-tint-c) 240);
+  --project-color-8: oklch(var(--project-tint-l) var(--project-tint-c) 265);
+  --project-color-9: oklch(var(--project-tint-l) var(--project-tint-c) 290);
+  --project-color-10: oklch(var(--project-tint-l) var(--project-tint-c) 320);
+  --project-color-11: oklch(var(--project-tint-l) var(--project-tint-c) 345);
   @variant dark {
+    --project-tint-l: 0.76;
+    --project-tint-c: 0.12;
     --appearance-contrast-target: white;
     --app-scrollbar-thumb: rgb(255 255 255 / 8%);
     --app-scrollbar-thumb-hover: rgb(255 255 255 / 12%);

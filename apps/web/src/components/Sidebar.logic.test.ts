@@ -23,6 +23,7 @@ import {
   resolveSidebarThreadStatus,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
+  searchSidebarProjectsByName,
   searchSidebarThreadsByTitle,
   formatWorkingDurationLabel,
   shouldNavigateAfterProjectRemoval,
@@ -780,6 +781,35 @@ describe("searchSidebarThreadsByTitle", () => {
 
   it("returns no results for an empty query", () => {
     expect(searchSidebarThreadsByTitle(threads, "   ")).toEqual([]);
+  });
+});
+
+describe("searchSidebarProjectsByName", () => {
+  const projects = [
+    { displayName: "sbxs-infra", workspaceRoot: "/home/dev-server/projects/sbxs-infra" },
+    { displayName: "heft", workspaceRoot: "/home/dev-server/projects/heft" },
+    { displayName: "infra-tools", workspaceRoot: "/srv/sbx/infra-tools" },
+    { displayName: "focor", workspaceRoot: "/home/dev-server/projects/focor" },
+  ];
+
+  it("ranks prefix matches above contained ones", () => {
+    expect(searchSidebarProjectsByName(projects, "infra")).toEqual([projects[2], projects[0]]);
+  });
+
+  it("falls back to the workspace path so a folder name still finds the project", () => {
+    expect(searchSidebarProjectsByName(projects, "/srv")).toEqual([projects[2]]);
+  });
+
+  it("is case-insensitive and ignores surrounding space", () => {
+    expect(searchSidebarProjectsByName(projects, "  HEFT ")).toEqual([projects[1]]);
+  });
+
+  it("returns nothing for an empty query", () => {
+    expect(searchSidebarProjectsByName(projects, "  ")).toEqual([]);
+  });
+
+  it("caps the result list", () => {
+    expect(searchSidebarProjectsByName(projects, "o", 2)).toHaveLength(2);
   });
 });
 

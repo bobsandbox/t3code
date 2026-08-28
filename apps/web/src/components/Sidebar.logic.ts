@@ -583,6 +583,41 @@ export function searchSidebarThreadsByTitle<T extends { readonly title: string }
   return threads.filter((thread) => thread.title.toLowerCase().includes(normalizedQuery));
 }
 
+/** Sidebar search also answers "where is that project", not just "where is that
+    thread". Projects are few and the query is short, so a plain contains-match
+    on the name is enough — but the workspace path is matched too, because a
+    project is often remembered by its folder ("~/projects/heft") rather than by
+    the title it was given.
+
+    Ranked so a prefix match wins: typing "sb" should put sbxs-infra above a
+    project that merely lives under /home/sb. Results are capped because this
+    list shares the panel with thread hits, which are the more common target. */
+export function searchSidebarProjectsByName<
+  T extends { readonly displayName: string; readonly workspaceRoot: string },
+>(projects: readonly T[], query: string, limit = 6): T[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery.length === 0) return [];
+  const ranked: { project: T; rank: number }[] = [];
+  for (const project of projects) {
+    const name = project.displayName.toLowerCase();
+    const rank = name.startsWith(normalizedQuery)
+      ? 0
+      : name.includes(normalizedQuery)
+        ? 1
+        : project.workspaceRoot.toLowerCase().includes(normalizedQuery)
+          ? 2
+          : -1;
+    if (rank >= 0) ranked.push({ project, rank });
+  }
+  return ranked
+    .sort(
+      (left, right) =>
+        left.rank - right.rank || left.project.displayName.localeCompare(right.project.displayName),
+    )
+    .slice(0, limit)
+    .map((entry) => entry.project);
+}
+
 type SettledTimestampInput = Pick<
   SidebarThreadSummary,
   "settledAt" | "latestUserMessageAt" | "latestTurn" | "updatedAt"

@@ -37,6 +37,7 @@ import {
   AlarmClockOffIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
@@ -92,6 +93,7 @@ import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
+import { projectColorStyle } from "../projectColor";
 import {
   buildSidebarProjectSnapshots,
   type SidebarProjectSnapshot,
@@ -135,6 +137,7 @@ import {
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
+  searchSidebarProjectsByName,
   searchSidebarThreadsByTitle,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
@@ -177,7 +180,6 @@ import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
@@ -1254,8 +1256,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             {/* Settled history recedes: dimmed favicon at rest, restored on
               hover so the tail stays scannable when you're hunting. */}
             <span
+              style={projectColorStyle(props.projectTitle)}
               className={cn(
-                "shrink-0 transition-opacity",
+                "shrink-0 text-[color:var(--project-color,var(--sidebar-icon-color))] transition-opacity",
                 !props.isActive &&
                   "opacity-40 grayscale group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
               )}
@@ -1264,7 +1267,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 environmentId={thread.environmentId}
                 cwd={props.projectCwd ?? ""}
                 faviconPath={props.projectFaviconPath}
-                className="size-4"
+                className="size-4 text-current"
                 fallbackIcon={MessageSquareIcon}
               />
             </span>
@@ -1392,7 +1395,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }
       {...(sortable?.listeners ?? {})}
       className={cn(
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_96px]",
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_66px]",
         sortable?.isDragging && "z-20 opacity-80",
       )}
     >
@@ -1412,32 +1415,96 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
+          {/* Two lines, not three: the title leads, and the project moved down
+              into the metadata line as a tinted label. A dedicated project
+              header cost a full line per row and repeated itself down the whole
+              list — the colour carries that signal now. */}
+          <div className="relative z-10 h-[3.625rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                cwd={props.projectCwd ?? ""}
-                faviconPath={props.projectFaviconPath}
-                className="size-4 shrink-0"
-              />
-              {props.projectTitle ? (
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
-                    shouldRecede ? "font-normal" : "font-medium",
-                  )}
-                >
-                  {props.projectTitle}
+              {title}
+              {isRegeneratingTitle ? (
+                <span role="status" className="sr-only">
+                  Regenerating title
                 </span>
+              ) : null}
+              {pinIndicator}
+            </div>
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+              {/* The project label: tinted by name, and smaller than the branch
+                  beside it, because it repeats on every row of a project while
+                  the branch is the thing that differs. */}
+              <span
+                style={projectColorStyle(props.projectTitle)}
+                className="flex min-w-0 shrink items-center gap-1 text-[color:var(--project-color,var(--sidebar-icon-color))]"
+              >
+                <ProjectFavicon
+                  environmentId={thread.environmentId}
+                  cwd={props.projectCwd ?? ""}
+                  faviconPath={props.projectFaviconPath}
+                  className="size-3.5 shrink-0 text-current"
+                />
+                {props.projectTitle ? (
+                  <span
+                    className={cn(
+                      "min-w-0 truncate text-[0.6875rem] leading-none",
+                      shouldRecede ? "font-normal" : "font-medium",
+                    )}
+                  >
+                    {props.projectTitle}
+                  </span>
+                ) : null}
+              </span>
+              {/* Always the branch. The plan step used to take this slot while
+                  working, but it truncated to a half-sentence and dropped the
+                  branch, so the row lost its most stable identifier. */}
+              {thread.branch ? (
+                <>
+                  <ThreadWorktreeIndicator thread={thread} />
+                  <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
+                </>
               ) : (
                 <span className="flex-1" />
               )}
-              {pinIndicator}
+              {terminalStatusIcon}
+              {prBadge}
+              {diff ? (
+                <span className="shrink-0 font-mono">
+                  <span className="text-emerald-600 dark:text-emerald-400">+{diff.insertions}</span>{" "}
+                  <span className="text-red-600 dark:text-red-400">−{diff.deletions}</span>
+                </span>
+              ) : null}
+              <span
+                aria-hidden
+                className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
+              >
+                {isRemote ? (
+                  <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
+                    <ServerIcon aria-hidden className="size-3.5" />
+                  </span>
+                ) : null}
+                {driverKind ? (
+                  <span className="inline-flex shrink-0 items-center">
+                    <ProviderInstanceIcon
+                      driverKind={driverKind}
+                      displayName={
+                        providerEntry?.displayName ??
+                        thread.session?.providerName ??
+                        modelInstanceId
+                      }
+                      accentColor={providerEntry?.accentColor}
+                      showBadge={showInstanceBadge}
+                      // Glyph dims, badge stays saturated; offset matches the composer trigger.
+                      iconClassName="size-3.5 opacity-60"
+                      badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
+                    />
+                  </span>
+                ) : null}
+              </span>
               {/* The visible state owns this slot's width: status at rest,
                   actions on hover/keyboard focus or while the popover is open. Keeping
                   the hidden state out of flow lets the project label reclaim
                   space without either state overlapping it. */}
-              <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
+              <span className="group/sidebar-status-slot relative flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
                 {/* Read-only status labels yield to the hover actions. Woke is
                     itself an action, so it stays pointer-enabled and visible
                     while the other controls appear beside it. */}
@@ -1536,62 +1603,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                         <TooltipPopup>Settle thread</TooltipPopup>
                       </Tooltip>
                     ) : null}
-                  </span>
-                ) : null}
-              </span>
-            </div>
-            <div className="mt-1 flex min-w-0">
-              {title}
-              {isRegeneratingTitle ? (
-                <span role="status" className="sr-only">
-                  Regenerating title
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-              {/* Always the branch. The plan step used to take this slot while
-                  working, but it truncated to a half-sentence and dropped the
-                  branch, so the row lost its most stable identifier. */}
-              {thread.branch ? (
-                <>
-                  <ThreadWorktreeIndicator thread={thread} />
-                  <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
-                </>
-              ) : (
-                <span className="flex-1" />
-              )}
-              {terminalStatusIcon}
-              {prBadge}
-              {diff ? (
-                <span className="shrink-0 font-mono">
-                  <span className="text-emerald-600 dark:text-emerald-400">+{diff.insertions}</span>{" "}
-                  <span className="text-red-600 dark:text-red-400">−{diff.deletions}</span>
-                </span>
-              ) : null}
-              <span
-                aria-hidden
-                className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
-              >
-                {isRemote ? (
-                  <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
-                    <ServerIcon aria-hidden className="size-3.5" />
-                  </span>
-                ) : null}
-                {driverKind ? (
-                  <span className="inline-flex shrink-0 items-center">
-                    <ProviderInstanceIcon
-                      driverKind={driverKind}
-                      displayName={
-                        providerEntry?.displayName ??
-                        thread.session?.providerName ??
-                        modelInstanceId
-                      }
-                      accentColor={providerEntry?.accentColor}
-                      showBadge={showInstanceBadge}
-                      // Glyph dims, badge stays saturated; offset matches the composer trigger.
-                      iconClassName="size-3.5 opacity-60"
-                      badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
-                    />
                   </span>
                 ) : null}
               </span>
@@ -1803,7 +1814,18 @@ export default function Sidebar() {
       );
     },
   });
-  const [projectScopeMenuOpen, setProjectScopeMenuOpen] = useState(false);
+  // The project list is a lane to the LEFT of the thread list rather than a
+  // dropdown over it: picking a project is a navigation step, and a popup that
+  // covers the rows it is about to filter reads as a filter chip instead.
+  const [projectPanelOpen, setProjectPanelOpen] = useState(false);
+  // Both lanes need their real height while the track slides. At rest the
+  // off-screen one collapses to zero height so it cannot stretch the sidebar's
+  // scroll range with content nobody can see.
+  const [projectPanelSliding, setProjectPanelSliding] = useState(false);
+  const toggleProjectPanel = useCallback((open: boolean) => {
+    setProjectPanelSliding(true);
+    setProjectPanelOpen(open);
+  }, []);
   const newThreadContext = useHandleNewThread();
   const openAddProjectCommandPalette = useCallback(
     () => openCommandPalette({ open: "add-project" }),
@@ -2000,7 +2022,7 @@ export default function Sidebar() {
     (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
       event.preventDefault();
       event.stopPropagation();
-      setProjectScopeMenuOpen(false);
+      toggleProjectPanel(false);
       if (isMobile) {
         setOpenMobile(false);
       }
@@ -2009,7 +2031,7 @@ export default function Sidebar() {
         params: { projectKey: projectGroup.projectKey },
       });
     },
-    [isMobile, router, setOpenMobile],
+    [isMobile, router, setOpenMobile, toggleProjectPanel],
   );
 
   // Settled threads stay in the live shell stream (settled ≠ archived), so
@@ -2129,18 +2151,35 @@ export default function Sidebar() {
     () => searchSidebarThreadsByTitle(searchableThreads, threadSearchQuery),
     [searchableThreads, threadSearchQuery],
   );
-  const threadSearchResultOrderKey = threadSearchResults
-    .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
-    .join("\0");
+  // Search answers "take me there", and a project is a destination too. The two
+  // kinds share one index space so arrow keys walk the whole panel: projects
+  // first because they are the coarser jump and there are only ever a few.
+  const projectSearchResults = useMemo(
+    () => searchSidebarProjectsByName(projectGroups, threadSearchQuery),
+    [projectGroups, threadSearchQuery],
+  );
+  const searchResultCount = projectSearchResults.length + threadSearchResults.length;
+  const threadSearchResultOrderKey = [
+    ...projectSearchResults.map((project) => project.projectKey),
+    ...threadSearchResults.map((thread) =>
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+    ),
+  ].join("\0");
 
   useEffect(() => {
     setActiveSearchResultIndex(0);
   }, [threadSearchResultOrderKey]);
 
+  // Results render in the threads lane. Searching while the projects lane is
+  // open would file them off-screen, so a query brings the track back.
+  useEffect(() => {
+    if (isSearchingThreads && projectPanelOpen) toggleProjectPanel(false);
+  }, [isSearchingThreads, projectPanelOpen, toggleProjectPanel]);
+
   useEffect(() => {
     if (!isSearchingThreads) return;
     document
-      .getElementById(`sidebar-thread-search-result-${activeSearchResultIndex}`)
+      .getElementById(`sidebar-search-result-${activeSearchResultIndex}`)
       ?.scrollIntoView({ block: "nearest" });
   }, [activeSearchResultIndex, isSearchingThreads, threadSearchResultOrderKey]);
 
@@ -2346,6 +2385,15 @@ export default function Sidebar() {
     [clearSelection, isMobile, router, setOpenMobile],
   );
 
+  const selectProjectScope = useCallback(
+    (projectKey: string | null) => {
+      setProjectScopeKey(projectKey);
+      toggleProjectPanel(false);
+      if (isMobile) setOpenMobile(false);
+    },
+    [isMobile, setOpenMobile, toggleProjectPanel],
+  );
+
   const clearThreadSearch = useCallback(() => {
     setThreadSearchQuery("");
     setActiveSearchResultIndex(0);
@@ -2356,6 +2404,13 @@ export default function Sidebar() {
       navigateToThread(scopeThreadRef(thread.environmentId, thread.id));
     },
     [clearThreadSearch, navigateToThread],
+  );
+  const selectProjectSearchResult = useCallback(
+    (project: SidebarProjectSnapshot) => {
+      clearThreadSearch();
+      selectProjectScope(project.projectKey);
+    },
+    [clearThreadSearch, selectProjectScope],
   );
   const handleThreadSearchKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -2368,22 +2423,25 @@ export default function Sidebar() {
         clearThreadSearch();
         return;
       }
-      if (threadSearchResults.length === 0) return;
+      if (searchResultCount === 0) return;
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setActiveSearchResultIndex((index) => (index + 1) % threadSearchResults.length);
+        setActiveSearchResultIndex((index) => (index + 1) % searchResultCount);
         return;
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setActiveSearchResultIndex(
-          (index) => (index - 1 + threadSearchResults.length) % threadSearchResults.length,
-        );
+        setActiveSearchResultIndex((index) => (index - 1 + searchResultCount) % searchResultCount);
         return;
       }
       if (event.key === "Enter") {
         event.preventDefault();
-        const result = threadSearchResults[activeSearchResultIndex];
+        const project = projectSearchResults[activeSearchResultIndex];
+        if (project) {
+          selectProjectSearchResult(project);
+          return;
+        }
+        const result = threadSearchResults[activeSearchResultIndex - projectSearchResults.length];
         if (result) selectThreadSearchResult(result);
       }
     },
@@ -2391,6 +2449,9 @@ export default function Sidebar() {
       activeSearchResultIndex,
       clearThreadSearch,
       isSearchingThreads,
+      projectSearchResults,
+      searchResultCount,
+      selectProjectSearchResult,
       selectThreadSearchResult,
       threadSearchResults,
     ],
@@ -3412,18 +3473,18 @@ export default function Sidebar() {
                   }}
                   onKeyDown={handleThreadSearchKeyDown}
                   placeholder="Search"
-                  aria-label="Search threads"
+                  aria-label="Search threads and projects"
                   role="combobox"
                   aria-autocomplete="list"
-                  aria-expanded={isSearchingThreads && threadSearchResults.length > 0}
+                  aria-expanded={isSearchingThreads && searchResultCount > 0}
                   aria-controls={
-                    isSearchingThreads && threadSearchResults.length > 0
+                    isSearchingThreads && searchResultCount > 0
                       ? "sidebar-thread-search-results"
                       : undefined
                   }
                   aria-activedescendant={
-                    isSearchingThreads && threadSearchResults[activeSearchResultIndex]
-                      ? `sidebar-thread-search-result-${activeSearchResultIndex}`
+                    isSearchingThreads && activeSearchResultIndex < searchResultCount
+                      ? `sidebar-search-result-${activeSearchResultIndex}`
                       : undefined
                   }
                   className="min-w-0 flex-1 [&_[data-slot=input]]:h-auto [&_[data-slot=input]]:p-0 [&_[data-slot=input]]:leading-normal [&_[data-slot=input]]:text-sm [&_[data-slot=input]]:font-medium [&_[data-slot=input]]:text-sidebar-foreground [&_[data-slot=input]]:placeholder:text-sidebar-muted-foreground"
@@ -3490,80 +3551,42 @@ export default function Sidebar() {
             </div>
             {projectGroups.length > 0 ? (
               <div className="flex items-center gap-1">
-                <Menu open={projectScopeMenuOpen} onOpenChange={setProjectScopeMenuOpen}>
-                  <MenuTrigger
-                    render={
-                      <SidebarMenuButton
-                        aria-label="Filter threads by project"
-                        className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                      />
-                    }
-                  >
-                    {scopedProjectGroup ? (
+                <SidebarMenuButton
+                  type="button"
+                  aria-label="Browse projects"
+                  aria-expanded={projectPanelOpen}
+                  onClick={() => toggleProjectPanel(!projectPanelOpen)}
+                  className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                >
+                  {scopedProjectGroup ? (
+                    <span
+                      style={projectColorStyle(scopedProjectGroup.displayName)}
+                      className="flex shrink-0 items-center text-[color:var(--project-color,var(--sidebar-icon-color))]"
+                    >
                       <ProjectFavicon
                         environmentId={scopedProjectGroup.environmentId}
                         cwd={scopedProjectGroup.workspaceRoot}
                         faviconPath={scopedProjectGroup.faviconPath}
-                        className="size-4 shrink-0"
+                        className="size-4 shrink-0 text-current"
                       />
-                    ) : (
-                      <FolderIcon className="size-4 shrink-0" />
-                    )}
-                    <span className="min-w-0 flex-1 truncate">
-                      {scopedProjectGroup?.displayName ?? "All projects"}
                     </span>
-                    <ChevronDownIcon className="-mr-px size-4 shrink-0" />
-                  </MenuTrigger>
-                  <MenuPopup align="start" className="w-(--anchor-width)">
-                    <MenuRadioGroup
-                      value={projectScopeKey ?? "all"}
-                      onValueChange={(value) =>
-                        setProjectScopeKey(value === "all" ? null : (value as string))
-                      }
-                    >
-                      <MenuRadioItem
-                        value="all"
-                        closeOnClick
-                        className="h-8 min-h-8 py-0 text-sm font-medium [&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
-                      >
-                        <FolderIcon className="size-4 shrink-0" />
-                        <span className="min-w-0 truncate text-sm">All projects</span>
-                      </MenuRadioItem>
-                      {projectGroups.map((project) => {
-                        const scopeKey = project.projectKey;
-                        return (
-                          <MenuRadioItem
-                            key={scopeKey}
-                            value={scopeKey}
-                            closeOnClick
-                            className="h-8 min-h-8 py-0 text-sm font-medium [&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
-                          >
-                            <ProjectFavicon
-                              environmentId={project.environmentId}
-                              cwd={project.workspaceRoot}
-                              faviconPath={project.faviconPath}
-                              className="size-4 shrink-0"
-                            />
-                            <span className="min-w-0 truncate text-sm">{project.displayName}</span>
-                            <Button
-                              size="icon-xs"
-                              variant="ghost-muted"
-                              aria-label={`Project settings for ${project.displayName}`}
-                              title={`Project settings for ${project.displayName}`}
-                              className="ml-auto size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
-                              onPointerDown={(event) => event.stopPropagation()}
-                              onClick={(event) => {
-                                void handleProjectSettings(event, project);
-                              }}
-                            >
-                              <SettingsIcon className="size-3.5" />
-                            </Button>
-                          </MenuRadioItem>
-                        );
-                      })}
-                    </MenuRadioGroup>
-                  </MenuPopup>
-                </Menu>
+                  ) : (
+                    <FolderIcon className="size-4 shrink-0" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate">
+                    {scopedProjectGroup?.displayName ?? "All projects"}
+                  </span>
+                  {/* Points at the lane it opens: left while the projects are
+                      parked off-screen, right once they have slid in and the
+                      threads are the thing waiting to come back. */}
+                  <ChevronLeftIcon
+                    aria-hidden
+                    className={cn(
+                      "-mr-px size-4 shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none",
+                      projectPanelOpen && "rotate-180",
+                    )}
+                  />
+                </SidebarMenuButton>
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -3590,368 +3613,507 @@ export default function Sidebar() {
         }
       >
         <SidebarGroup className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0">
-          {isSearchingThreads ? (
-            threadSearchResults.length > 0 ? (
-              <TooltipProvider
-                key="sidebar-thread-search-tooltips-150"
-                delay={150}
-                closeDelay={0}
-                timeout={400}
-              >
-                <ul
-                  id="sidebar-thread-search-results"
-                  role="listbox"
-                  aria-label="Thread search results"
-                  className="flex flex-col gap-px"
-                >
-                  {threadSearchResults.map((thread, index) => {
-                    const threadKey = scopedThreadKey(
-                      scopeThreadRef(thread.environmentId, thread.id),
-                    );
-                    return (
-                      <SidebarSearchResultRow
-                        key={threadKey}
-                        thread={thread}
-                        projectCwd={
-                          projectCwdByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
-                        }
-                        projectFaviconPath={
-                          projectFaviconPathByKey.get(
-                            `${thread.environmentId}:${thread.projectId}`,
-                          ) ?? null
-                        }
-                        projectTitle={
-                          projectDisplayNameByKey.get(
-                            `${thread.environmentId}:${thread.projectId}`,
-                          ) ?? null
-                        }
-                        environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
-                        providerEntryByInstanceId={
-                          providerEntriesByEnvironment.get(thread.environmentId) ??
-                          EMPTY_PROVIDER_ENTRIES
-                        }
-                        isHighlighted={activeSearchResultIndex === index}
-                        isRouteActive={routeThreadKey === threadKey}
-                        resultId={`sidebar-thread-search-result-${index}`}
-                        onHighlight={() => setActiveSearchResultIndex(index)}
-                        onSelect={() => selectThreadSearchResult(thread)}
-                      />
-                    );
-                  })}
-                </ul>
-              </TooltipProvider>
-            ) : (
-              <p
-                role="status"
-                className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
-              >
-                No threads found
-              </p>
-            )
-          ) : null}
-          {!isSearchingThreads ? (
-            <TooltipProvider
-              key="sidebar-thread-tooltips-150"
-              delay={150}
-              closeDelay={0}
-              timeout={400}
-            >
-              <ul ref={attachListAutoAnimateRef} role="list" className="flex flex-col gap-px">
-                {(() => {
-                  const renderThreadRow = (
-                    thread: EnvironmentThreadShell,
-                    section: "pinned" | "active" | "snoozed" | "settled",
-                    sortable?: SortablePinnedRowBag,
-                  ) => {
-                    const threadKey = scopedThreadKey(
-                      scopeThreadRef(thread.environmentId, thread.id),
-                    );
-                    // Settled and snoozed are the ONLY things that collapse a
-                    // row: every other thread is a full card. Density comes
-                    // from users (or the auto rules) actually parking work,
-                    // not from the sidebar second-guessing what still matters.
-                    const isCard = section === "active" || section === "pinned";
-                    const rowVariant = isCard ? "card" : "slim";
-                    return (
-                      <SidebarThreadRow
-                        // Keyed per variant on purpose: when a thread settles,
-                        // the card fades out in place and the slim row fades
-                        // in at its settled position instead of one element
-                        // FLIP-sliding through every row in between (rows here
-                        // are translucent, so a crossing row reads as text
-                        // painted over text).
-                        key={`${threadKey}:${rowVariant}`}
-                        thread={thread}
-                        variant={rowVariant}
-                        // Snoozed rows wake; settled rows un-settle (explicit
-                        // settles clear the override, auto-settled rows get
-                        // pinned active); cards settle.
-                        variantAction={
-                          section === "snoozed"
-                            ? "unsnooze"
-                            : section === "settled"
-                              ? "unsettle"
-                              : "settle"
-                        }
-                        settlementSupported={
-                          serverConfigs.get(thread.environmentId)?.environment.capabilities
-                            .threadSettlement === true
-                        }
-                        autoSettleOnMerge={autoSettleOnMerge}
-                        snoozeSupported={
-                          serverConfigs.get(thread.environmentId)?.environment.capabilities
-                            .threadSnooze === true
-                        }
-                        pinningSupported={
-                          serverConfigs.get(thread.environmentId)?.environment.capabilities
-                            .threadPinning === true
-                        }
-                        isPinned={thread.pinnedAt != null}
-                        sortable={sortable}
-                        snoozeWakeLabelText={
-                          section === "snoozed" && thread.snoozedUntil != null
-                            ? snoozeWakeLabel(thread.snoozedUntil, {
-                                now: new Date().toISOString(),
-                              })
-                            : null
-                        }
-                        // All sections: a woken thread can classify straight
-                        // into the settled tail (PR merged while snoozed), and
-                        // the wake signal must survive the trip. Still-snoozed
-                        // rows resolve to null on their own.
-                        wokeAt={threadWokeAt(thread, { now: snoozeNow })}
-                        isActive={routeThreadKey === threadKey}
-                        openPullRequestsInRightPanel={routeThreadRef !== null}
-                        jumpLabel={
-                          showThreadJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
-                        }
-                        currentEnvironmentId={primaryEnvironmentId}
-                        environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
-                        projectCwd={
-                          projectCwdByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
-                        }
-                        projectFaviconPath={
-                          projectFaviconPathByKey.get(
-                            `${thread.environmentId}:${thread.projectId}`,
-                          ) ?? null
-                        }
-                        projectTitle={
-                          projectDisplayNameByKey.get(
-                            `${thread.environmentId}:${thread.projectId}`,
-                          ) ?? null
-                        }
-                        providerEntryByInstanceId={
-                          providerEntriesByEnvironment.get(thread.environmentId) ??
-                          EMPTY_PROVIDER_ENTRIES
-                        }
-                        timestampFormat={timestampFormat}
-                        onThreadClick={handleThreadClick}
-                        onThreadActivate={navigateToThread}
-                        onStartRename={startThreadRename}
-                        onRenameTitleChange={setRenamingTitle}
-                        onCommitRename={commitThreadRename}
-                        onCancelRename={cancelThreadRename}
-                        isRenaming={renamingThreadKey === threadKey}
-                        renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
-                        onContextMenu={handleThreadContextMenu}
-                        onSettle={attemptSettle}
-                        onUnsettle={attemptUnsettle}
-                        onSnooze={attemptSnooze}
-                        onUnsnooze={attemptUnsnooze}
-                        onUnpin={attemptUnpin}
-                        onAcknowledgeWoke={acknowledgeWoke}
-                        changeRequestSnapshot={changeRequestSnapshotByKey.get(threadKey) ?? null}
-                        onChangeRequestSnapshot={setThreadChangeRequestSnapshot}
-                      />
-                    );
-                  };
-                  // Draft block above everything, then the pinned block:
-                  // full cards above the inbox, closed by a thin divider (the
-                  // pin glyphs carry the meaning, so no header text). Both
-                  // vanish entirely at count 0.
-                  // Pinned rows render in the one shared pinned order; only
-                  // reorder-capable rows register as sortable (legacy-server
-                  // pins render in place as plain rows).
-                  const items: ReactNode[] = [
-                    <SidebarDraftBlock
-                      key="draft-sessions"
-                      projectDisplayNameByKey={projectDisplayNameByKey}
-                      projectCwdByKey={projectCwdByKey}
-                      projectFaviconPathByKey={projectFaviconPathByKey}
-                      scopedProjectKeys={scopedProjectKeys}
-                      routeDraftId={routeDraftIdForRows}
-                      onNavigateToDraft={navigateToDraft}
-                    />,
-                    pinnedThreads.length > 0 ? (
-                      <li key="pinned-dnd" className="list-none">
-                        <DndContext
-                          sensors={pinnedDndSensors}
-                          collisionDetection={closestCenter}
-                          modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
-                          onDragEnd={handlePinnedDragEnd}
-                        >
-                          <SortableContext
-                            items={orderedPinnedThreads
-                              .map((thread) =>
-                                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-                              )
-                              .filter((threadKey) => reorderablePinnedKeys.has(threadKey))}
-                            strategy={verticalListSortingStrategy}
-                          >
-                            <ul
-                              role="list"
-                              aria-label="Pinned threads"
-                              className="flex flex-col gap-px"
-                            >
-                              {orderedPinnedThreads.map((thread) => {
-                                const threadKey = scopedThreadKey(
-                                  scopeThreadRef(thread.environmentId, thread.id),
-                                );
-                                if (!reorderablePinnedKeys.has(threadKey)) {
-                                  return renderThreadRow(thread, "pinned");
-                                }
-                                return (
-                                  <SortablePinnedThreadRow key={threadKey} id={threadKey}>
-                                    {(bag) => renderThreadRow(thread, "pinned", bag)}
-                                  </SortablePinnedThreadRow>
-                                );
-                              })}
-                            </ul>
-                          </SortableContext>
-                        </DndContext>
-                      </li>
-                    ) : null,
-                  ];
-                  if (pinnedThreads.length > 0) {
-                    items.push(
-                      <li
-                        key="pinned-divider"
-                        aria-hidden
-                        data-testid="sidebar-pinned-divider"
-                        className="mx-2.5 my-1.5 h-px list-none bg-sidebar-border/60"
-                      />,
-                    );
-                  }
-                  for (const thread of activeThreads) {
-                    items.push(renderThreadRow(thread, "active"));
-                  }
-                  // Snoozed shelf: between the inbox and Settled — out of the
-                  // way, never gone. The header always renders while anything
-                  // is snoozed (the count is the whole footprint when
-                  // collapsed); rows only when expanded. Vanishes entirely at
-                  // count 0.
-                  if (snoozedThreads.length > 0) {
-                    items.push(
-                      <li
-                        key="snoozed-shelf-header"
-                        data-thread-selection-safe
-                        className="list-none"
-                      >
-                        <button
-                          type="button"
-                          onClick={toggleSnoozedShelf}
-                          aria-expanded={snoozedShelfExpanded}
-                          data-testid="sidebar-snoozed-shelf-toggle"
-                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
-                        >
-                          <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                            {snoozedShelfExpanded
-                              ? "Snoozed"
-                              : `Snoozed (${snoozedThreads.length})`}
-                          </span>
-                          <span className="h-px flex-1 bg-blue-500/20 dark:bg-blue-400/15" />
-                          <ChevronDownIcon
-                            aria-hidden
-                            className={cn(
-                              "size-3 text-blue-600 transition-transform dark:text-blue-400",
-                              snoozedShelfExpanded && "rotate-180",
-                            )}
-                          />
-                        </button>
-                      </li>,
-                    );
-                    for (const thread of visibleSnoozedThreads) {
-                      items.push(renderThreadRow(thread, "snoozed"));
-                    }
-                  }
-                  if (settledThreads.length > 0) {
-                    items.push(
-                      <li
-                        key="settled-shelf-header"
-                        data-thread-selection-safe
-                        className="list-none"
-                      >
-                        <button
-                          type="button"
-                          onClick={toggleSettledShelf}
-                          aria-expanded={settledShelfExpanded}
-                          data-testid="sidebar-settled-shelf-toggle"
-                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
-                        >
-                          <span className="text-xs font-medium text-muted-foreground/50">
-                            {settledShelfExpanded
-                              ? "Settled"
-                              : `Settled (${settledThreads.length})`}
-                          </span>
-                          <span className="h-px flex-1 bg-sidebar-border/60" />
-                          <ChevronDownIcon
-                            aria-hidden
-                            className={cn(
-                              "size-3 text-muted-foreground/50 transition-transform",
-                              settledShelfExpanded && "rotate-180",
-                            )}
-                          />
-                        </button>
-                      </li>,
-                    );
-                  }
-                  for (const thread of renderedSettledThreads) {
-                    items.push(renderThreadRow(thread, "settled"));
-                  }
-                  return items;
-                })()}
-                {settledShelfExpanded && hiddenSettledCount > 0 ? (
-                  <li className="list-none">
-                    <button
-                      type="button"
-                      onClick={showMoreSettled}
-                      className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                    >
-                      <PlusIcon aria-hidden className="size-4 shrink-0" />
-                      Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
-                    </button>
-                  </li>
-                ) : null}
-              </ul>
-            </TooltipProvider>
-          ) : null}
-          {!isSearchingThreads &&
-          visibleDraftSessionCount === 0 &&
-          pinnedThreads.length +
-            activeThreads.length +
-            snoozedThreads.length +
-            settledThreads.length ===
-            0 ? (
-            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
-              {projects.length === 0 ? (
-                <>
-                  <span>No projects yet</span>
-                  <button
-                    type="button"
-                    onClick={openAddProjectCommandPalette}
-                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                  >
-                    <PlusIcon className="-mx-0.5 size-3" />
-                    Add project
-                  </button>
-                </>
-              ) : scopedProjectGroup ? (
-                `No threads in ${scopedProjectGroup.displayName} yet`
-              ) : (
-                "No threads yet"
+          {/* Two lanes on one track. The projects lane is parked off-screen
+              to the left; opening it slides the track right, which is the same
+              gesture as stepping back up a level. */}
+          <div className="w-full overflow-x-clip">
+            <div
+              className={cn(
+                "flex w-full items-start transition-transform duration-200 ease-out motion-reduce:transition-none",
+                projectPanelOpen ? "translate-x-0" : "-translate-x-full",
               )}
+              onTransitionEnd={(event) => {
+                if (event.propertyName === "transform") setProjectPanelSliding(false);
+              }}
+            >
+              <div
+                aria-label="Projects"
+                aria-hidden={!projectPanelOpen}
+                inert={!projectPanelOpen}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  event.preventDefault();
+                  toggleProjectPanel(false);
+                }}
+                className={cn(
+                  "w-full shrink-0",
+                  // Collapsed only once parked: during the slide it needs its
+                  // real height or the lane visibly folds as it leaves.
+                  !projectPanelOpen && !projectPanelSliding && "h-0 overflow-hidden",
+                )}
+              >
+                <ul role="list" className="flex flex-col gap-px">
+                  <li>
+                    <SidebarMenuButton
+                      type="button"
+                      onClick={() => selectProjectScope(null)}
+                      data-active={projectScopeKey === null}
+                      className="w-full min-w-0"
+                    >
+                      <FolderIcon className="size-4 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">All projects</span>
+                    </SidebarMenuButton>
+                  </li>
+                  {projectGroups.map((project) => (
+                    <li key={project.projectKey} className="relative flex items-center">
+                      <SidebarMenuButton
+                        type="button"
+                        onClick={() => selectProjectScope(project.projectKey)}
+                        data-active={projectScopeKey === project.projectKey}
+                        className="w-full min-w-0 pe-8"
+                      >
+                        <span
+                          style={projectColorStyle(project.displayName)}
+                          className="flex shrink-0 items-center text-[color:var(--project-color,var(--sidebar-icon-color))]"
+                        >
+                          <ProjectFavicon
+                            environmentId={project.environmentId}
+                            cwd={project.workspaceRoot}
+                            faviconPath={project.faviconPath}
+                            className="size-4 shrink-0 text-current"
+                          />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
+                      </SidebarMenuButton>
+                      <Button
+                        size="icon-xs"
+                        variant="ghost-muted"
+                        aria-label={`Project settings for ${project.displayName}`}
+                        title={`Project settings for ${project.displayName}`}
+                        className="absolute end-1 size-6 [--control-icon-color:currentColor] text-icon-muted"
+                        onClick={(event) => {
+                          void handleProjectSettings(event, project);
+                        }}
+                      >
+                        <SettingsIcon className="size-3.5" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div
+                aria-hidden={projectPanelOpen}
+                inert={projectPanelOpen}
+                className={cn(
+                  "w-full shrink-0",
+                  projectPanelOpen && !projectPanelSliding && "h-0 overflow-hidden",
+                )}
+              >
+                {isSearchingThreads ? (
+                  searchResultCount > 0 ? (
+                    <TooltipProvider
+                      key="sidebar-thread-search-tooltips-150"
+                      delay={150}
+                      closeDelay={0}
+                      timeout={400}
+                    >
+                      <ul
+                        id="sidebar-thread-search-results"
+                        role="listbox"
+                        aria-label="Search results"
+                        className="flex flex-col gap-px"
+                      >
+                        {projectSearchResults.map((project, index) => (
+                          <li key={project.projectKey}>
+                            <SidebarMenuButton
+                              id={`sidebar-search-result-${index}`}
+                              role="option"
+                              aria-selected={activeSearchResultIndex === index}
+                              type="button"
+                              data-active={activeSearchResultIndex === index}
+                              onPointerMove={() => setActiveSearchResultIndex(index)}
+                              onClick={() => selectProjectSearchResult(project)}
+                              className="w-full min-w-0"
+                            >
+                              <span
+                                style={projectColorStyle(project.displayName)}
+                                className="flex shrink-0 items-center text-[color:var(--project-color,var(--sidebar-icon-color))]"
+                              >
+                                <ProjectFavicon
+                                  environmentId={project.environmentId}
+                                  cwd={project.workspaceRoot}
+                                  faviconPath={project.faviconPath}
+                                  className="size-4 shrink-0 text-current"
+                                />
+                              </span>
+                              <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
+                              {/* Says what selecting this row does, since a
+                                project hit navigates the sidebar rather than
+                                opening a thread like every row under it. */}
+                              <span className="shrink-0 text-[0.6875rem] text-sidebar-muted-foreground">
+                                Project
+                              </span>
+                            </SidebarMenuButton>
+                          </li>
+                        ))}
+                        {threadSearchResults.map((thread, index) => {
+                          const threadKey = scopedThreadKey(
+                            scopeThreadRef(thread.environmentId, thread.id),
+                          );
+                          return (
+                            <SidebarSearchResultRow
+                              key={threadKey}
+                              thread={thread}
+                              projectCwd={
+                                projectCwdByKey.get(
+                                  `${thread.environmentId}:${thread.projectId}`,
+                                ) ?? null
+                              }
+                              projectFaviconPath={
+                                projectFaviconPathByKey.get(
+                                  `${thread.environmentId}:${thread.projectId}`,
+                                ) ?? null
+                              }
+                              projectTitle={
+                                projectDisplayNameByKey.get(
+                                  `${thread.environmentId}:${thread.projectId}`,
+                                ) ?? null
+                              }
+                              environmentLabel={
+                                environmentLabelById.get(thread.environmentId) ?? null
+                              }
+                              providerEntryByInstanceId={
+                                providerEntriesByEnvironment.get(thread.environmentId) ??
+                                EMPTY_PROVIDER_ENTRIES
+                              }
+                              isHighlighted={
+                                activeSearchResultIndex === index + projectSearchResults.length
+                              }
+                              isRouteActive={routeThreadKey === threadKey}
+                              resultId={`sidebar-thread-search-result-${index}`}
+                              onHighlight={() => setActiveSearchResultIndex(index)}
+                              onSelect={() => selectThreadSearchResult(thread)}
+                            />
+                          );
+                        })}
+                      </ul>
+                    </TooltipProvider>
+                  ) : (
+                    <p
+                      role="status"
+                      className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
+                    >
+                      Nothing found
+                    </p>
+                  )
+                ) : null}
+                {!isSearchingThreads ? (
+                  <TooltipProvider
+                    key="sidebar-thread-tooltips-150"
+                    delay={150}
+                    closeDelay={0}
+                    timeout={400}
+                  >
+                    <ul ref={attachListAutoAnimateRef} role="list" className="flex flex-col gap-px">
+                      {(() => {
+                        const renderThreadRow = (
+                          thread: EnvironmentThreadShell,
+                          section: "pinned" | "active" | "snoozed" | "settled",
+                          sortable?: SortablePinnedRowBag,
+                        ) => {
+                          const threadKey = scopedThreadKey(
+                            scopeThreadRef(thread.environmentId, thread.id),
+                          );
+                          // Settled and snoozed are the ONLY things that collapse a
+                          // row: every other thread is a full card. Density comes
+                          // from users (or the auto rules) actually parking work,
+                          // not from the sidebar second-guessing what still matters.
+                          const isCard = section === "active" || section === "pinned";
+                          const rowVariant = isCard ? "card" : "slim";
+                          return (
+                            <SidebarThreadRow
+                              // Keyed per variant on purpose: when a thread settles,
+                              // the card fades out in place and the slim row fades
+                              // in at its settled position instead of one element
+                              // FLIP-sliding through every row in between (rows here
+                              // are translucent, so a crossing row reads as text
+                              // painted over text).
+                              key={`${threadKey}:${rowVariant}`}
+                              thread={thread}
+                              variant={rowVariant}
+                              // Snoozed rows wake; settled rows un-settle (explicit
+                              // settles clear the override, auto-settled rows get
+                              // pinned active); cards settle.
+                              variantAction={
+                                section === "snoozed"
+                                  ? "unsnooze"
+                                  : section === "settled"
+                                    ? "unsettle"
+                                    : "settle"
+                              }
+                              settlementSupported={
+                                serverConfigs.get(thread.environmentId)?.environment.capabilities
+                                  .threadSettlement === true
+                              }
+                              autoSettleOnMerge={autoSettleOnMerge}
+                              snoozeSupported={
+                                serverConfigs.get(thread.environmentId)?.environment.capabilities
+                                  .threadSnooze === true
+                              }
+                              pinningSupported={
+                                serverConfigs.get(thread.environmentId)?.environment.capabilities
+                                  .threadPinning === true
+                              }
+                              isPinned={thread.pinnedAt != null}
+                              sortable={sortable}
+                              snoozeWakeLabelText={
+                                section === "snoozed" && thread.snoozedUntil != null
+                                  ? snoozeWakeLabel(thread.snoozedUntil, {
+                                      now: new Date().toISOString(),
+                                    })
+                                  : null
+                              }
+                              // All sections: a woken thread can classify straight
+                              // into the settled tail (PR merged while snoozed), and
+                              // the wake signal must survive the trip. Still-snoozed
+                              // rows resolve to null on their own.
+                              wokeAt={threadWokeAt(thread, { now: snoozeNow })}
+                              isActive={routeThreadKey === threadKey}
+                              openPullRequestsInRightPanel={routeThreadRef !== null}
+                              jumpLabel={
+                                showThreadJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
+                              }
+                              currentEnvironmentId={primaryEnvironmentId}
+                              environmentLabel={
+                                environmentLabelById.get(thread.environmentId) ?? null
+                              }
+                              projectCwd={
+                                projectCwdByKey.get(
+                                  `${thread.environmentId}:${thread.projectId}`,
+                                ) ?? null
+                              }
+                              projectFaviconPath={
+                                projectFaviconPathByKey.get(
+                                  `${thread.environmentId}:${thread.projectId}`,
+                                ) ?? null
+                              }
+                              projectTitle={
+                                projectDisplayNameByKey.get(
+                                  `${thread.environmentId}:${thread.projectId}`,
+                                ) ?? null
+                              }
+                              providerEntryByInstanceId={
+                                providerEntriesByEnvironment.get(thread.environmentId) ??
+                                EMPTY_PROVIDER_ENTRIES
+                              }
+                              timestampFormat={timestampFormat}
+                              onThreadClick={handleThreadClick}
+                              onThreadActivate={navigateToThread}
+                              onStartRename={startThreadRename}
+                              onRenameTitleChange={setRenamingTitle}
+                              onCommitRename={commitThreadRename}
+                              onCancelRename={cancelThreadRename}
+                              isRenaming={renamingThreadKey === threadKey}
+                              renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
+                              onContextMenu={handleThreadContextMenu}
+                              onSettle={attemptSettle}
+                              onUnsettle={attemptUnsettle}
+                              onSnooze={attemptSnooze}
+                              onUnsnooze={attemptUnsnooze}
+                              onUnpin={attemptUnpin}
+                              onAcknowledgeWoke={acknowledgeWoke}
+                              changeRequestSnapshot={
+                                changeRequestSnapshotByKey.get(threadKey) ?? null
+                              }
+                              onChangeRequestSnapshot={setThreadChangeRequestSnapshot}
+                            />
+                          );
+                        };
+                        // Draft block above everything, then the pinned block:
+                        // full cards above the inbox, closed by a thin divider (the
+                        // pin glyphs carry the meaning, so no header text). Both
+                        // vanish entirely at count 0.
+                        // Pinned rows render in the one shared pinned order; only
+                        // reorder-capable rows register as sortable (legacy-server
+                        // pins render in place as plain rows).
+                        const items: ReactNode[] = [
+                          <SidebarDraftBlock
+                            key="draft-sessions"
+                            projectDisplayNameByKey={projectDisplayNameByKey}
+                            projectCwdByKey={projectCwdByKey}
+                            projectFaviconPathByKey={projectFaviconPathByKey}
+                            scopedProjectKeys={scopedProjectKeys}
+                            routeDraftId={routeDraftIdForRows}
+                            onNavigateToDraft={navigateToDraft}
+                          />,
+                          pinnedThreads.length > 0 ? (
+                            <li key="pinned-dnd" className="list-none">
+                              <DndContext
+                                sensors={pinnedDndSensors}
+                                collisionDetection={closestCenter}
+                                modifiers={[
+                                  restrictToVerticalAxis,
+                                  restrictToFirstScrollableAncestor,
+                                ]}
+                                onDragEnd={handlePinnedDragEnd}
+                              >
+                                <SortableContext
+                                  items={orderedPinnedThreads
+                                    .map((thread) =>
+                                      scopedThreadKey(
+                                        scopeThreadRef(thread.environmentId, thread.id),
+                                      ),
+                                    )
+                                    .filter((threadKey) => reorderablePinnedKeys.has(threadKey))}
+                                  strategy={verticalListSortingStrategy}
+                                >
+                                  <ul
+                                    role="list"
+                                    aria-label="Pinned threads"
+                                    className="flex flex-col gap-px"
+                                  >
+                                    {orderedPinnedThreads.map((thread) => {
+                                      const threadKey = scopedThreadKey(
+                                        scopeThreadRef(thread.environmentId, thread.id),
+                                      );
+                                      if (!reorderablePinnedKeys.has(threadKey)) {
+                                        return renderThreadRow(thread, "pinned");
+                                      }
+                                      return (
+                                        <SortablePinnedThreadRow key={threadKey} id={threadKey}>
+                                          {(bag) => renderThreadRow(thread, "pinned", bag)}
+                                        </SortablePinnedThreadRow>
+                                      );
+                                    })}
+                                  </ul>
+                                </SortableContext>
+                              </DndContext>
+                            </li>
+                          ) : null,
+                        ];
+                        if (pinnedThreads.length > 0) {
+                          items.push(
+                            <li
+                              key="pinned-divider"
+                              aria-hidden
+                              data-testid="sidebar-pinned-divider"
+                              className="mx-2.5 my-1.5 h-px list-none bg-sidebar-border/60"
+                            />,
+                          );
+                        }
+                        for (const thread of activeThreads) {
+                          items.push(renderThreadRow(thread, "active"));
+                        }
+                        // Snoozed shelf: between the inbox and Settled — out of the
+                        // way, never gone. The header always renders while anything
+                        // is snoozed (the count is the whole footprint when
+                        // collapsed); rows only when expanded. Vanishes entirely at
+                        // count 0.
+                        if (snoozedThreads.length > 0) {
+                          items.push(
+                            <li
+                              key="snoozed-shelf-header"
+                              data-thread-selection-safe
+                              className="list-none"
+                            >
+                              <button
+                                type="button"
+                                onClick={toggleSnoozedShelf}
+                                aria-expanded={snoozedShelfExpanded}
+                                data-testid="sidebar-snoozed-shelf-toggle"
+                                className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                              >
+                                <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                                  {snoozedShelfExpanded
+                                    ? "Snoozed"
+                                    : `Snoozed (${snoozedThreads.length})`}
+                                </span>
+                                <span className="h-px flex-1 bg-blue-500/20 dark:bg-blue-400/15" />
+                                <ChevronDownIcon
+                                  aria-hidden
+                                  className={cn(
+                                    "size-3 text-blue-600 transition-transform dark:text-blue-400",
+                                    snoozedShelfExpanded && "rotate-180",
+                                  )}
+                                />
+                              </button>
+                            </li>,
+                          );
+                          for (const thread of visibleSnoozedThreads) {
+                            items.push(renderThreadRow(thread, "snoozed"));
+                          }
+                        }
+                        if (settledThreads.length > 0) {
+                          items.push(
+                            <li
+                              key="settled-shelf-header"
+                              data-thread-selection-safe
+                              className="list-none"
+                            >
+                              <button
+                                type="button"
+                                onClick={toggleSettledShelf}
+                                aria-expanded={settledShelfExpanded}
+                                data-testid="sidebar-settled-shelf-toggle"
+                                className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                              >
+                                <span className="text-xs font-medium text-muted-foreground/50">
+                                  {settledShelfExpanded
+                                    ? "Settled"
+                                    : `Settled (${settledThreads.length})`}
+                                </span>
+                                <span className="h-px flex-1 bg-sidebar-border/60" />
+                                <ChevronDownIcon
+                                  aria-hidden
+                                  className={cn(
+                                    "size-3 text-muted-foreground/50 transition-transform",
+                                    settledShelfExpanded && "rotate-180",
+                                  )}
+                                />
+                              </button>
+                            </li>,
+                          );
+                        }
+                        for (const thread of renderedSettledThreads) {
+                          items.push(renderThreadRow(thread, "settled"));
+                        }
+                        return items;
+                      })()}
+                      {settledShelfExpanded && hiddenSettledCount > 0 ? (
+                        <li className="list-none">
+                          <button
+                            type="button"
+                            onClick={showMoreSettled}
+                            className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                          >
+                            <PlusIcon aria-hidden className="size-4 shrink-0" />
+                            Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
+                          </button>
+                        </li>
+                      ) : null}
+                    </ul>
+                  </TooltipProvider>
+                ) : null}
+                {!isSearchingThreads &&
+                visibleDraftSessionCount === 0 &&
+                pinnedThreads.length +
+                  activeThreads.length +
+                  snoozedThreads.length +
+                  settledThreads.length ===
+                  0 ? (
+                  <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
+                    {projects.length === 0 ? (
+                      <>
+                        <span>No projects yet</span>
+                        <button
+                          type="button"
+                          onClick={openAddProjectCommandPalette}
+                          className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                        >
+                          <PlusIcon className="-mx-0.5 size-3" />
+                          Add project
+                        </button>
+                      </>
+                    ) : scopedProjectGroup ? (
+                      `No threads in ${scopedProjectGroup.displayName} yet`
+                    ) : (
+                      "No threads yet"
+                    )}
+                  </div>
+                ) : null}
+              </div>
             </div>
-          ) : null}
+          </div>
         </SidebarGroup>
       </SidebarContent>
       <SidebarChromeFooter />
