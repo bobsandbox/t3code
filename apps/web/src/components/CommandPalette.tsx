@@ -76,6 +76,7 @@ import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import { useUpdatePrimarySettings } from "../hooks/useSettings";
 import { useProjects, useThreadShells } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
@@ -84,6 +85,7 @@ import {
   ensureBrowseDirectoryPath,
   findProjectByPath,
   getBrowseDirectoryPath,
+  getBrowseParentPath,
   hasTrailingPathSeparator,
   inferProjectTitleFromPath,
   isExplicitRelativeProjectPath,
@@ -585,6 +587,7 @@ function OpenCommandPaletteDialog(props: {
   const { environments } = useEnvironments();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const updatePrimarySettings = useUpdatePrimarySettings();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const projects = useProjects();
@@ -1801,17 +1804,33 @@ function OpenCommandPaletteDialog(props: {
         );
         return;
       }
+      // Where you put a project is where you will put the next one. Remember
+      // its parent as the folder the browser opens in, so the second project
+      // starts one keystroke from done instead of at ~/ again. Only for the
+      // primary environment: the setting is written to that server's
+      // settings.json, and a remote project's parent has no meaning there.
+      const parentDirectory = getBrowseParentPath(cwd);
+      if (
+        parentDirectory !== null &&
+        input.environmentId === primaryEnvironmentId &&
+        ensureBrowseDirectoryPath(parentDirectory) !==
+          getAddProjectInitialQueryForEnvironment(input.environmentId)
+      ) {
+        updatePrimarySettings({ addProjectBaseDirectory: parentDirectory });
+      }
       setOpen(false);
     },
     [
       handleNewThread,
       createProject,
       environments,
+      getAddProjectInitialQueryForEnvironment,
       navigate,
       primaryEnvironmentId,
       projects,
       providers,
       setOpen,
+      updatePrimarySettings,
       clientSettings.sidebarThreadSortOrder,
       threads,
     ],
@@ -2044,6 +2063,38 @@ function OpenCommandPaletteDialog(props: {
     browseUp,
     browseTo,
   });
+  // Browsing only ever offered folders that already exist, so starting a
+  // project meant leaving to create the folder first. The create path was
+  // already there — project.create takes createWorkspaceRootIfMissing and the
+  // server makes the directory — it just had no affordance. Typing a name that
+  // matches nothing now offers to create it, in the folder you are looking at.
+  const newFolderName = browsePath.filterQuery.trim();
+  const newFolderIsNovel =
+    newFolderName.length > 0 &&
+    !browseEntries.some((entry) => entry.name.toLowerCase() === newFolderName.toLowerCase());
+  const addProjectBrowseGroups = !newFolderIsNovel
+    ? browseGroups
+    : browseGroups.map((group) =>
+        group.value === "directories"
+          ? {
+              ...group,
+              items: [
+                {
+                  kind: "action" as const,
+                  value: `browse:create:${newFolderName}`,
+                  searchTerms: [query, newFolderName],
+                  title: `Create "${newFolderName}"`,
+                  description: `New folder in ${browsePath.directoryPath}`,
+                  icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+                  run: async () => {
+                    await handleAddProject(query.trim());
+                  },
+                },
+                ...group.items,
+              ],
+            }
+          : group,
+      );
   const cloneDestinationBrowseGroups = useMemo(
     () =>
       browseGroups.map((group) =>
@@ -2070,7 +2121,7 @@ function OpenCommandPaletteDialog(props: {
   } else if (addProjectCloneFlow?.step === "confirm") {
     displayedGroups = relativePathNeedsActiveProject ? [] : cloneDestinationBrowseGroups;
   } else if (isBrowsing) {
-    displayedGroups = relativePathNeedsActiveProject ? [] : browseGroups;
+    displayedGroups = relativePathNeedsActiveProject ? [] : addProjectBrowseGroups;
   }
 
   const inputPlaceholder =
