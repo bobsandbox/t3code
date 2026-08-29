@@ -11,7 +11,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { ChangeRequestSettleSource } from "@t3tools/client-runtime/state/thread-settled";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, MailOpenIcon, PinIcon, PinOffIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -36,6 +36,8 @@ import { useRemoteOpenState, type RemoteOpenMode } from "../../remoteOpen";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
+import { useThreadShell } from "../../state/entities";
+import { readEnvironmentSupportsPinning } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -198,12 +200,20 @@ export const ChatHeader = memo(function ChatHeader({
     },
     [activeThreadEnvironmentId, activeThreadId, activeThreadTitle, updateThreadMetadata],
   );
-  const { openMenu, closeMenu } = useThreadActionMenu({
+  const { openMenu, closeMenu, togglePin, markUnread } = useThreadActionMenu({
     threadRef: isServerThread ? activeThreadRef : null,
     projectCwd: activeProjectCwd,
     changeRequest,
     onStartRename: startRename,
   });
+  // Pin and mark-unread are lifted out of the thread menu into the header
+  // itself: they are the two verbs a mail client puts on the message it has
+  // open, and the menu is a poor place for something used this often. Both
+  // still exist in the menu; these are the same actions, not a second path.
+  const activeThreadShell = useThreadShell(isServerThread ? activeThreadRef : null);
+  const isThreadPinned = activeThreadShell?.pinnedAt != null;
+  const pinningSupported =
+    isServerThread && readEnvironmentSupportsPinning(activeThreadEnvironmentId);
   const titleButtonRef = useRef<HTMLButtonElement | null>(null);
   const titleMenuTimerRef = useRef<number | null>(null);
   const cancelPendingTitleMenu = useCallback(() => {
@@ -380,6 +390,54 @@ export const ChatHeader = memo(function ChatHeader({
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
+        {isServerThread ? (
+          <div className="flex shrink-0 items-center gap-0.5">
+            {pinningSupported ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={isThreadPinned ? "Unpin thread" : "Pin thread"}
+                      aria-pressed={isThreadPinned}
+                      onClick={togglePin}
+                      className={cn(
+                        "inline-flex size-7 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+                        isThreadPinned
+                          ? "text-foreground"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    />
+                  }
+                >
+                  {isThreadPinned ? (
+                    <PinOffIcon aria-hidden className="size-4" />
+                  ) : (
+                    <PinIcon aria-hidden className="size-4" />
+                  )}
+                </TooltipTrigger>
+                <TooltipPopup side="bottom">
+                  {isThreadPinned ? "Unpin thread" : "Pin thread"}
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="Mark unread"
+                    onClick={markUnread}
+                    className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                }
+              >
+                <MailOpenIcon aria-hidden className="size-4" />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">Mark unread</TooltipPopup>
+            </Tooltip>
+          </div>
+        ) : null}
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}

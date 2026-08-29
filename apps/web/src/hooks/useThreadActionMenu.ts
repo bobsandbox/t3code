@@ -339,5 +339,31 @@ export function useThreadActionMenu(input: {
     void readLocalApi()?.contextMenu.close();
   }, []);
 
-  return { openMenu, closeMenu };
+  // The header exposes two of these actions as buttons rather than menu items
+  // (they are the mail-client verbs: pin and mark unread). They run the same
+  // code paths as the menu entries so the two can never drift.
+  const togglePin = useCallback(() => {
+    if (threadRef === null) return;
+    void (async () => {
+      const thread = readThreadShell(threadRef);
+      if (!thread) return;
+      const isPinned = thread.pinnedAt != null;
+      const result = await (isPinned ? unpinThread(threadRef) : pinThread(threadRef));
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        failureToast(
+          isPinned ? "Failed to unpin thread" : "Failed to pin thread",
+          squashAtomCommandFailure(result),
+        );
+      }
+    })();
+  }, [pinThread, threadRef, unpinThread]);
+
+  const markUnread = useCallback(() => {
+    if (threadRef === null) return;
+    const thread = readThreadShell(threadRef);
+    if (!thread) return;
+    markThreadUnread(scopedThreadKey(threadRef), thread.latestTurn?.completedAt);
+  }, [markThreadUnread, threadRef]);
+
+  return { openMenu, closeMenu, togglePin, markUnread };
 }
