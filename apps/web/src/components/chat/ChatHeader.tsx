@@ -11,7 +11,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { ChangeRequestSettleSource } from "@t3tools/client-runtime/state/thread-settled";
-import { ChevronDownIcon, MailOpenIcon, PinIcon, PinOffIcon } from "lucide-react";
+import { ChevronDownIcon, MailOpenIcon, PinIcon, PinOffIcon, RefreshCwIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -37,7 +37,10 @@ import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
 import { useThreadShell } from "../../state/entities";
-import { readEnvironmentSupportsPinning } from "../../state/entities";
+import {
+  readEnvironmentSupportsPinning,
+  readEnvironmentSupportsTitleRegeneration,
+} from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -200,7 +203,7 @@ export const ChatHeader = memo(function ChatHeader({
     },
     [activeThreadEnvironmentId, activeThreadId, activeThreadTitle, updateThreadMetadata],
   );
-  const { openMenu, closeMenu, togglePin, markUnread } = useThreadActionMenu({
+  const { openMenu, closeMenu, togglePin, markUnread, regenerateTitle } = useThreadActionMenu({
     threadRef: isServerThread ? activeThreadRef : null,
     projectCwd: activeProjectCwd,
     changeRequest,
@@ -214,6 +217,9 @@ export const ChatHeader = memo(function ChatHeader({
   const isThreadPinned = activeThreadShell?.pinnedAt != null;
   const pinningSupported =
     isServerThread && readEnvironmentSupportsPinning(activeThreadEnvironmentId);
+  const titleRegenerationSupported =
+    isServerThread && readEnvironmentSupportsTitleRegeneration(activeThreadEnvironmentId);
+  const isRegeneratingTitle = activeThreadShell?.titleRegeneration != null;
   const titleButtonRef = useRef<HTMLButtonElement | null>(null);
   const titleMenuTimerRef = useRef<number | null>(null);
   const cancelPendingTitleMenu = useCallback(() => {
@@ -436,6 +442,35 @@ export const ChatHeader = memo(function ChatHeader({
               </TooltipTrigger>
               <TooltipPopup side="bottom">Mark unread</TooltipPopup>
             </Tooltip>
+            {titleRegenerationSupported ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={isRegeneratingTitle ? "Regenerating title" : "Regenerate title"}
+                      onClick={regenerateTitle}
+                      disabled={isRegeneratingTitle}
+                      aria-busy={isRegeneratingTitle || undefined}
+                      className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:hover:bg-transparent"
+                    />
+                  }
+                >
+                  {/* Spins while the server is working on it, which is the
+                      only feedback the title itself gives until it changes. */}
+                  <RefreshCwIcon
+                    aria-hidden
+                    className={cn(
+                      "size-4",
+                      isRegeneratingTitle && "animate-spin motion-reduce:animate-none",
+                    )}
+                  />
+                </TooltipTrigger>
+                <TooltipPopup side="bottom">
+                  {isRegeneratingTitle ? "Regenerating title" : "Regenerate title"}
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
           </div>
         ) : null}
         {activeProjectScripts && (

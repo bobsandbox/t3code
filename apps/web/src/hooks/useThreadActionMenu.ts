@@ -358,6 +358,23 @@ export function useThreadActionMenu(input: {
     })();
   }, [pinThread, threadRef, unpinThread]);
 
+  const regenerateTitle = useCallback(() => {
+    if (threadRef === null) return;
+    void (async () => {
+      const thread = readThreadShell(threadRef);
+      // Already regenerating: the server is the one holding that state, and a
+      // second request would only queue a title nobody asked for twice.
+      if (!thread || thread.titleRegeneration != null) return;
+      const result = await updateThreadMetadata({
+        environmentId: threadRef.environmentId,
+        input: { threadId: threadRef.threadId, regenerateTitle: true },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        failureToast("Failed to regenerate thread title", squashAtomCommandFailure(result));
+      }
+    })();
+  }, [threadRef, updateThreadMetadata]);
+
   const markUnread = useCallback(() => {
     if (threadRef === null) return;
     const thread = readThreadShell(threadRef);
@@ -365,5 +382,5 @@ export function useThreadActionMenu(input: {
     markThreadUnread(scopedThreadKey(threadRef), thread.latestTurn?.completedAt);
   }, [markThreadUnread, threadRef]);
 
-  return { openMenu, closeMenu, togglePin, markUnread };
+  return { openMenu, closeMenu, togglePin, markUnread, regenerateTitle };
 }
