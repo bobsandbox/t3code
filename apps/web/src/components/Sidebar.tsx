@@ -39,7 +39,6 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
-  ChevronRightIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
@@ -3764,9 +3763,12 @@ export default function Sidebar() {
                     </>
                   ) : (
                     <>
+                      {/* Same leading chevron as the scoped row: the list lives
+                          off to the left in both states, so the arrow points
+                          the way the lane actually slides in from. */}
+                      <ChevronLeftIcon aria-hidden className="-ms-px size-4 shrink-0" />
                       <FolderIcon className="size-4 shrink-0" />
                       <span className="min-w-0 flex-1 truncate">All projects</span>
-                      <ChevronRightIcon aria-hidden className="-me-px size-4 shrink-0" />
                     </>
                   )}
                 </SidebarMenuButton>
