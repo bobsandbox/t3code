@@ -3738,6 +3738,11 @@ export default function Sidebar() {
                   type="button"
                   aria-label={scopedProjectGroup ? "Back to all projects" : "Browse projects"}
                   onClick={() => toggleProjectPanel(true)}
+                  onContextMenu={
+                    scopedProjectGroup
+                      ? (event) => handleProjectContextMenu(event, scopedProjectGroup)
+                      : undefined
+                  }
                   className="h-7 min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] text-[0.8125rem] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                 >
                   {scopedProjectGroup ? (
