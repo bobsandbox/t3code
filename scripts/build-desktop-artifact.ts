@@ -51,7 +51,11 @@ import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
-const DESKTOP_APP_ID = "com.t3tools.t3code";
+// Our fork installs beside the official app rather than on top of it. The
+// bundle id is what LaunchServices keys on, so sharing it would make macOS
+// treat the two builds as one app; upstream uses this same constant for its
+// stable and nightly channels, which is why it is a constant to change here.
+const DESKTOP_APP_ID = "be.sandboxservices.t3code";
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
