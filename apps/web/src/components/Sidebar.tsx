@@ -2100,6 +2100,7 @@ export default function Sidebar() {
     activeThreads,
     snoozedThreads,
     settledThreads,
+    liveThreadsEverywhere,
     snoozeNow,
   } = useMemo(() => {
     const now = `${nowMinute}:00.000Z`;
@@ -2109,12 +2110,16 @@ export default function Sidebar() {
     // memo exactly at the next wake boundary.
     void snoozeWakeTick;
     const preciseNow = new Date().toISOString();
-    const visible = threads.filter(
-      (thread) =>
-        thread.archivedAt === null &&
-        (scopedProjectKeys === null ||
-          scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
-    );
+    // Classification runs over every thread, not just the scoped ones: the
+    // project lane summarises projects you are NOT looking at, and a scope
+    // filter here left every other project's row blank. Scope is applied to
+    // the lists below, where it belongs.
+    const visible = threads.filter((thread) => thread.archivedAt === null);
+    const inScope = (thread: EnvironmentThreadShell) =>
+      scopedProjectKeys === null ||
+      scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`);
+    // Pinned and active across all projects, for the lane's status glyphs.
+    const liveEverywhere: EnvironmentThreadShell[] = [];
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
     const snoozed: EnvironmentThreadShell[] = [];
@@ -2141,7 +2146,7 @@ export default function Sidebar() {
           : null;
       // Snooze outranks settlement and pinning until the thread wakes.
       if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow })) {
-        snoozed.push(thread);
+        if (inScope(thread)) snoozed.push(thread);
       } else if (
         supportsSettlement &&
         effectiveSettled(thread, {
@@ -2151,11 +2156,13 @@ export default function Sidebar() {
           changeRequest,
         })
       ) {
-        settled.push(thread);
+        if (inScope(thread)) settled.push(thread);
       } else if (thread.pinnedAt != null) {
-        pinned.push(thread);
+        liveEverywhere.push(thread);
+        if (inScope(thread)) pinned.push(thread);
       } else {
-        active.push(thread);
+        liveEverywhere.push(thread);
+        if (inScope(thread)) active.push(thread);
       }
     }
     // One shared rule on every platform (see sortPinnedThreadsByOrderKey):
@@ -2182,6 +2189,7 @@ export default function Sidebar() {
           firstValidTimestampMs(right.snoozedUntil ?? null),
       ),
       settledThreads: sortSettledThreadsForSidebar(settled),
+      liveThreadsEverywhere: liveEverywhere,
       snoozeNow: preciseNow,
     };
   }, [
@@ -2225,14 +2233,14 @@ export default function Sidebar() {
   const projectActivityByKey = useMemo(
     () =>
       summarizeSidebarProjectActivity({
-        threads: [...pinnedThreads, ...activeThreads],
+        threads: liveThreadsEverywhere,
         projectKeyOf: (thread) =>
           logicalProjectKeyByThreadProjectKey.get(`${thread.environmentId}:${thread.projectId}`) ??
           null,
         lastVisitedAtOf: (thread) =>
           threadLastVisitedAtById[scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))],
       }),
-    [activeThreads, logicalProjectKeyByThreadProjectKey, pinnedThreads, threadLastVisitedAtById],
+    [liveThreadsEverywhere, logicalProjectKeyByThreadProjectKey, threadLastVisitedAtById],
   );
   const [pinnedProjectKeys, setPinnedProjectKeys] = useLocalStorage(
     PINNED_PROJECTS_KEY,
