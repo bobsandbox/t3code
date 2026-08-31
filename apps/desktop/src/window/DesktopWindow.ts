@@ -41,6 +41,7 @@ const DEVELOPMENT_LOAD_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
 const RENDERER_RECOVERY_RELOAD_DELAY_MS = 500;
 const RENDERER_RECOVERY_MAX_ATTEMPTS = 3;
 const RENDERER_RECOVERY_WINDOW_MS = 60_000;
+const DETACHED_WINDOW_SEARCH_PARAM = "t3Detached";
 const DEVELOPMENT_RETRYABLE_LOAD_ERROR_CODES = new Set([
   -2, // ERR_FAILED
   -7, // ERR_TIMED_OUT
@@ -186,6 +187,18 @@ export function isSameOriginRendererNavigation(input: {
 }): boolean {
   try {
     return new URL(input.applicationUrl).origin === new URL(input.navigationUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+export function isDetachedRendererWindowRequest(input: {
+  readonly applicationUrl: string;
+  readonly navigationUrl: string;
+}): boolean {
+  if (!isSameOriginRendererNavigation(input)) return false;
+  try {
+    return new URL(input.navigationUrl).searchParams.get(DETACHED_WINDOW_SEARCH_PARAM) === "1";
   } catch {
     return false;
   }
@@ -346,6 +359,19 @@ export const make = Effect.gen(function* () {
     if (persistedBounds !== null && initialBounds === DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE) {
       yield* logWindowWarning("saved main window bounds could not be restored; using defaults");
     }
+    const rendererWebPreferences = {
+      preload: environment.preloadPath,
+      // The window boots hidden (show: false until ready-to-show), and
+      // Chromium throttles hidden renderers: timers coalesce and rAF stops,
+      // which stalls first paint. Boot unthrottled; the first-reveal trigger
+      // re-enables throttling so a hidden or minimized window goes back to
+      // being cheap after it has been shown once.
+      backgroundThrottling: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webviewTag: true,
+    } satisfies Electron.WebPreferences;
     const window = yield* electronWindow.create({
       ...initialBounds,
       minWidth: 840,
@@ -357,19 +383,7 @@ export const make = Effect.gen(function* () {
       ...iconOption,
       title: environment.displayName,
       ...getWindowTitleBarOptions(shouldUseDarkColors, environment.platform),
-      webPreferences: {
-        preload: environment.preloadPath,
-        // The window boots hidden (show: false until ready-to-show), and
-        // Chromium throttles hidden renderers: timers coalesce and rAF stops,
-        // which stalls first paint. Boot unthrottled; the first-reveal trigger
-        // re-enables throttling so a hidden or minimized window goes back to
-        // being cheap after it has been shown once.
-        backgroundThrottling: false,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        webviewTag: true,
-      },
+      webPreferences: rendererWebPreferences,
     });
 
     if (environment.platform === "darwin") {
@@ -463,126 +477,198 @@ export const make = Effect.gen(function* () {
     flushMainWindowBounds = flushBoundsPersist;
 
     yield* previewManager.setMainWindow(window);
-    window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
-      if (
-        typeof params.partition !== "string" ||
-        !previewManager.isBrowserPartition(params.partition)
-      ) {
+    const installWebviewSecurity = (targetWindow: Electron.BrowserWindow) => {
+      targetWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+        if (
+          typeof params.partition !== "string" ||
+          !previewManager.isBrowserPartition(params.partition)
+        ) {
+          event.preventDefault();
+          return;
+        }
+        webPreferences.sandbox = true;
+        webPreferences.nodeIntegration = false;
+        webPreferences.nodeIntegrationInSubFrames = false;
+        webPreferences.contextIsolation = false;
+      });
+    };
+    installWebviewSecurity(window);
+
+    const installContextMenu = (targetWindow: Electron.BrowserWindow) => {
+      targetWindow.webContents.on("context-menu", (event, params) => {
         event.preventDefault();
-        return;
-      }
-      webPreferences.sandbox = true;
-      webPreferences.nodeIntegration = false;
-      webPreferences.nodeIntegrationInSubFrames = false;
-      webPreferences.contextIsolation = false;
-    });
 
-    window.webContents.on("context-menu", (event, params) => {
-      event.preventDefault();
+        const menuTemplate: Electron.MenuItemConstructorOptions[] = [];
 
-      const menuTemplate: Electron.MenuItemConstructorOptions[] = [];
-
-      if (params.misspelledWord) {
-        for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
-          menuTemplate.push({
-            label: suggestion,
-            click: () => window.webContents.replaceMisspelling(suggestion),
-          });
+        if (params.misspelledWord) {
+          for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
+            menuTemplate.push({
+              label: suggestion,
+              click: () => targetWindow.webContents.replaceMisspelling(suggestion),
+            });
+          }
+          if (params.dictionarySuggestions.length === 0) {
+            menuTemplate.push({ label: "No suggestions", enabled: false });
+          }
+          menuTemplate.push({ type: "separator" });
         }
-        if (params.dictionarySuggestions.length === 0) {
-          menuTemplate.push({ label: "No suggestions", enabled: false });
-        }
-        menuTemplate.push({ type: "separator" });
-      }
 
-      if (Option.isSome(ElectronShell.parseSafeExternalUrl(params.linkURL))) {
-        menuTemplate.push(
-          {
-            label: "Copy Link",
-            click: () => {
-              void runPromise(electronShell.copyText(params.linkURL));
+        if (Option.isSome(ElectronShell.parseSafeExternalUrl(params.linkURL))) {
+          menuTemplate.push(
+            {
+              label: "Copy Link",
+              click: () => {
+                void runPromise(electronShell.copyText(params.linkURL));
+              },
             },
-          },
-          { type: "separator" },
+            { type: "separator" },
+          );
+        }
+
+        if (params.mediaType === "image") {
+          menuTemplate.push({
+            label: "Copy Image",
+            click: () => targetWindow.webContents.copyImageAt(params.x, params.y),
+          });
+          menuTemplate.push({ type: "separator" });
+        }
+
+        menuTemplate.push(
+          { role: "cut", enabled: params.editFlags.canCut },
+          { role: "copy", enabled: params.editFlags.canCopy },
+          { role: "paste", enabled: params.editFlags.canPaste },
+          { role: "selectAll", enabled: params.editFlags.canSelectAll },
         );
-      }
 
-      if (params.mediaType === "image") {
-        menuTemplate.push({
-          label: "Copy Image",
-          click: () => window.webContents.copyImageAt(params.x, params.y),
-        });
-        menuTemplate.push({ type: "separator" });
-      }
+        void runPromise(
+          electronMenu.popupTemplate({ window: targetWindow, template: menuTemplate }),
+        );
+      });
+    };
+    installContextMenu(window);
 
-      menuTemplate.push(
-        { role: "cut", enabled: params.editFlags.canCut },
-        { role: "copy", enabled: params.editFlags.canCopy },
-        { role: "paste", enabled: params.editFlags.canPaste },
-        { role: "selectAll", enabled: params.editFlags.canSelectAll },
-      );
-
-      void runPromise(electronMenu.popupTemplate({ window, template: menuTemplate }));
-    });
-
-    window.webContents.setWindowOpenHandler(({ url }) => {
-      if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
-        void runPromise(electronShell.openExternal(url));
-      }
-      return { action: "deny" };
-    });
-    window.webContents.on("will-navigate", (event, url) => {
+    const handleRendererWindowOpen: Parameters<Electron.WebContents["setWindowOpenHandler"]>[0] = ({
+      url,
+    }) => {
       if (
-        isSameOriginRendererNavigation({
+        isDetachedRendererWindowRequest({
           applicationUrl,
           navigationUrl: url,
         })
       ) {
-        return;
+        return {
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            minWidth: 840,
+            minHeight: 620,
+            show: false,
+            autoHideMenuBar: true,
+            ...(environment.platform === "darwin" ? { disableAutoHideCursor: true } : {}),
+            backgroundColor: getInitialWindowBackgroundColor(shouldUseDarkColors),
+            ...iconOption,
+            title: environment.displayName,
+            ...getWindowTitleBarOptions(shouldUseDarkColors, environment.platform),
+            webPreferences: rendererWebPreferences,
+          },
+        };
       }
-
-      event.preventDefault();
       if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
         void runPromise(electronShell.openExternal(url));
       }
-    });
-
-    // Electron's windowMenu close role owns CmdOrCtrl+W. Holding the
-    // close-terminal shortcut can outlive the terminal that handled its first
-    // press, so reject repeats before they reach the native window accelerator.
-    // Deliberate presses still flow through the renderer or native menu.
-    // Chrome-style hold-to-quit: intercept the quit accelerator before the
-    // native menu sees it and only quit after the shortcut is held. The
-    // renderer shows the "Hold to Quit" hint via QUIT_SHORTCUT_CHANNEL.
-    const quitHoldHandler = makeQuitHoldHandler({
-      platform: environment.platform,
-      isEnabled: () =>
-        runPromise(
-          Effect.map(
-            clientSettings.get,
-            Option.match({
-              onNone: () => DEFAULT_CLIENT_SETTINGS.confirmQuit,
-              onSome: (settings) => settings.confirmQuit,
-            }),
-          ),
-        ),
-      notify: (state) => {
-        if (!window.isDestroyed()) {
-          window.webContents.send(QUIT_SHORTCUT_CHANNEL, state);
+      return { action: "deny" };
+    };
+    const installNavigationGuards = (targetWindow: Electron.BrowserWindow) => {
+      targetWindow.webContents.setWindowOpenHandler(handleRendererWindowOpen);
+      targetWindow.webContents.on("will-navigate", (event, url) => {
+        if (
+          isSameOriginRendererNavigation({
+            applicationUrl,
+            navigationUrl: url,
+          })
+        ) {
+          return;
         }
-      },
-      quit: () => {
-        void runPromise(electronApp.quit);
-      },
-    });
-    window.webContents.on("before-input-event", (event, input) => {
-      quitHoldHandler(event, input);
-      if (input.type !== "keyDown" || !input.isAutoRepeat) return;
-      const modifier = environment.platform === "darwin" ? input.meta : input.control;
-      if (modifier && !input.alt && !input.shift && input.key.toLowerCase() === "w") {
+
         event.preventDefault();
+        if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
+          void runPromise(electronShell.openExternal(url));
+        }
+      });
+    };
+    const installShortcutHandling = (targetWindow: Electron.BrowserWindow) => {
+      // Electron's windowMenu close role owns CmdOrCtrl+W. Holding the
+      // close-terminal shortcut can outlive the terminal that handled its first
+      // press, so reject repeats before they reach the native window accelerator.
+      // Deliberate presses still flow through the renderer or native menu.
+      // Chrome-style hold-to-quit: intercept the quit accelerator before the
+      // native menu sees it and only quit after the shortcut is held. The
+      // renderer shows the "Hold to Quit" hint via QUIT_SHORTCUT_CHANNEL.
+      const quitHoldHandler = makeQuitHoldHandler({
+        platform: environment.platform,
+        isEnabled: () =>
+          runPromise(
+            Effect.map(
+              clientSettings.get,
+              Option.match({
+                onNone: () => DEFAULT_CLIENT_SETTINGS.confirmQuit,
+                onSome: (settings) => settings.confirmQuit,
+              }),
+            ),
+          ),
+        notify: (state) => {
+          if (!targetWindow.isDestroyed()) {
+            targetWindow.webContents.send(QUIT_SHORTCUT_CHANNEL, state);
+          }
+        },
+        quit: () => {
+          void runPromise(electronApp.quit);
+        },
+      });
+      targetWindow.webContents.on("before-input-event", (event, input) => {
+        quitHoldHandler(event, input);
+        if (input.type !== "keyDown" || !input.isAutoRepeat) return;
+        const modifier = environment.platform === "darwin" ? input.meta : input.control;
+        if (modifier && !input.alt && !input.shift && input.key.toLowerCase() === "w") {
+          event.preventDefault();
+        }
+      });
+    };
+    const configureDetachedWindow = (detachedWindow: Electron.BrowserWindow) => {
+      if (environment.platform === "darwin") {
+        detachedWindow.setAutoHideCursor(false);
       }
-    });
+      installWebviewSecurity(detachedWindow);
+      installContextMenu(detachedWindow);
+      installNavigationGuards(detachedWindow);
+      installShortcutHandling(detachedWindow);
+      detachedWindow.webContents.on("did-create-window", configureDetachedWindow);
+      detachedWindow.on("page-title-updated", (event) => {
+        event.preventDefault();
+        detachedWindow.setTitle(environment.displayName);
+      });
+      if (environment.platform === "darwin") {
+        detachedWindow.on("enter-full-screen", () => {
+          detachedWindow.webContents.send(WINDOW_FULLSCREEN_STATE_CHANNEL, true);
+        });
+        detachedWindow.on("leave-full-screen", () => {
+          detachedWindow.webContents.send(WINDOW_FULLSCREEN_STATE_CHANNEL, false);
+        });
+      }
+      const revealSubscribers: RevealSubscription[] = [
+        (fire) => detachedWindow.once("ready-to-show", fire),
+      ];
+      if (environment.platform === "linux") {
+        revealSubscribers.push((fire) => detachedWindow.webContents.once("did-finish-load", fire));
+      }
+      bindFirstRevealTrigger(revealSubscribers, () => {
+        if (detachedWindow.isDestroyed()) return;
+        detachedWindow.webContents.setBackgroundThrottling(true);
+        void runPromise(electronWindow.reveal(detachedWindow));
+      });
+    };
+    installNavigationGuards(window);
+    installShortcutHandling(window);
+    window.webContents.on("did-create-window", configureDetachedWindow);
 
     window.on("page-title-updated", (event) => {
       event.preventDefault();

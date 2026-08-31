@@ -126,6 +126,7 @@ function makeFakeBrowserWindow() {
     send: webContents.send,
     setZoomLevel: webContents.setZoomLevel,
     setBackgroundThrottling: webContents.setBackgroundThrottling,
+    setWindowOpenHandler: webContents.setWindowOpenHandler,
     setAutoHideCursor: window.setAutoHideCursor,
     webContentsListeners,
     windowListeners,
@@ -431,6 +432,61 @@ describe("DesktopWindow", () => {
       }),
     );
   });
+
+  it("allows only marked same-origin URLs to create detached renderer windows", () => {
+    assert.isTrue(
+      DesktopWindow.isDetachedRendererWindowRequest({
+        applicationUrl: "t3code://app/",
+        navigationUrl: "t3code://app/local/thread?t3Detached=1&t3ProjectScope=project-a",
+      }),
+    );
+    assert.isFalse(
+      DesktopWindow.isDetachedRendererWindowRequest({
+        applicationUrl: "t3code://app/",
+        navigationUrl: "t3code://app/local/thread",
+      }),
+    );
+    assert.isFalse(
+      DesktopWindow.isDetachedRendererWindowRequest({
+        applicationUrl: "t3code://app/",
+        navigationUrl: "https://example.com/?t3Detached=1",
+      }),
+    );
+  });
+
+  it.effect("creates marked renderer windows with the desktop security defaults", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.createMain;
+      }).pipe(Effect.provide(layer));
+
+      const handler = fakeWindow.setWindowOpenHandler.mock.calls[0]?.[0];
+      assert.isFunction(handler);
+      const response = handler({
+        url: "t3code-dev://app/local/thread?t3Detached=1&t3WindowId=window-a",
+      } as Electron.HandlerDetails);
+      assert.strictEqual(response.action, "allow");
+      assert.strictEqual(response.overrideBrowserWindowOptions?.show, false);
+      assert.deepEqual(response.overrideBrowserWindowOptions?.webPreferences, {
+        preload: "/repo/apps/desktop/dist-electron/preload.cjs",
+        backgroundThrottling: false,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webviewTag: true,
+      });
+    }),
+  );
 
   it.effect("does not open a development window until the backend is ready", () =>
     Effect.gen(function* () {

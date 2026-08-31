@@ -65,6 +65,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
@@ -111,7 +112,11 @@ import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useThreadShells } from "../state/entities";
+import {
+  useAllEnvironmentShellsBootstrapped,
+  useProjects,
+  useThreadShells,
+} from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
@@ -123,6 +128,7 @@ import {
   resolveThreadRouteTarget,
 } from "../threadRoutes";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
+import { sortThreads } from "../lib/threadSort";
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
 import { buildProjectActionMenuItems } from "./projectActionMenu.logic";
@@ -199,6 +205,14 @@ import {
   type ComposerThreadDraftState,
   type DraftSessionState,
 } from "../composerDraftStore";
+import {
+  buildDetachedProjectUrl,
+  buildDetachedThreadUrl,
+  isScreenPointOutsideWindow,
+  openDetachedWindow,
+  readDetachedProjectScope,
+  type ScreenPoint,
+} from "../detachedWindow";
 
 // Settled-tail paging: recent history is the common lookup; the deep tail
 // stays behind an explicit Show more.
@@ -765,6 +779,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // sortable bag applied to the card root so the whole card drags (the
   // pointer sensor's distance constraint keeps plain clicks working).
   sortable?: SortablePinnedRowBag | undefined;
+  detachedWindowUrl: string | null;
+  onDetachedDrag: (event: ReactDragEvent) => void;
+  onDetachedDragEnd: (event: ReactDragEvent, url: string) => void;
   // Compact wake countdown ("2h") for rows in the snoozed shelf.
   snoozeWakeLabelText: string | null;
   // When a snooze ended (timer or early wake); drives the Woke pill until
@@ -802,12 +819,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   ) => void;
 }) {
   const {
+    detachedWindowUrl,
     isRenaming,
     changeRequestSnapshot,
     onChangeRequestSnapshot,
     onCancelRename,
     onCommitRename,
     onContextMenu,
+    onDetachedDrag,
+    onDetachedDragEnd,
     onAcknowledgeWoke,
     onRenameTitleChange,
     onSettle,
@@ -1063,6 +1083,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     },
     [isRenaming, onStartRename, thread.title, threadRef],
   );
+  const canNativeDetach = detachedWindowUrl !== null && props.sortable === undefined && !isRenaming;
+  const handleNativeDragStart = useCallback(
+    (event: ReactDragEvent) => {
+      if (detachedWindowUrl === null) {
+        event.preventDefault();
+        return;
+      }
+      event.dataTransfer.effectAllowed = "copy";
+      event.dataTransfer.setData("text/plain", thread.title);
+      event.dataTransfer.setData("text/uri-list", detachedWindowUrl);
+      onDetachedDrag(event);
+    },
+    [detachedWindowUrl, onDetachedDrag, thread.title],
+  );
+  const handleNativeDragEnd = useCallback(
+    (event: ReactDragEvent) => {
+      if (detachedWindowUrl === null) return;
+      onDetachedDragEnd(event, detachedWindowUrl);
+    },
+    [detachedWindowUrl, onDetachedDragEnd],
+  );
   const renameCommittedRef = useRef(false);
   useEffect(() => {
     if (isRenaming) renameCommittedRef.current = false;
@@ -1293,6 +1334,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               <div
                 role="button"
                 tabIndex={0}
+                draggable={canNativeDetach}
                 data-testid="sidebar-row-slim"
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
@@ -1300,6 +1342,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
                 onContextMenu={handleContextMenu}
+                onDragStart={handleNativeDragStart}
+                onDrag={onDetachedDrag}
+                onDragEnd={handleNativeDragEnd}
               />
             }
           >
@@ -1434,6 +1479,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   return (
     <li
       data-thread-item
+      draggable={canNativeDetach}
       ref={sortable?.setNodeRef}
       style={
         sortable
@@ -1444,6 +1490,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           : undefined
       }
       {...(sortable?.listeners ?? {})}
+      onDragStart={handleNativeDragStart}
+      onDrag={onDetachedDrag}
+      onDragEnd={handleNativeDragEnd}
       className={cn(
         "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_66px]",
         sortable?.isDragging && "z-20 opacity-80",
@@ -1793,6 +1842,7 @@ export default function Sidebar() {
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const sidebarThreadSortOrder = useClientSettings((s) => s.sidebarThreadSortOrder);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
@@ -1883,6 +1933,7 @@ export default function Sidebar() {
   );
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const allEnvironmentShellsBootstrapped = useAllEnvironmentShellsBootstrapped();
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
@@ -2012,7 +2063,9 @@ export default function Sidebar() {
 
   // Project scope: one menu above the list. Scoping filters the list without
   // making the header width depend on the number or length of project names.
-  const [projectScopeKey, setProjectScopeKey] = useState<string | null>(null);
+  const [projectScopeKey, setProjectScopeKey] = useState<string | null>(() =>
+    isElectron ? readDetachedProjectScope(window.location.href) : null,
+  );
   const scopedProjectGroup = useMemo(
     () =>
       projectScopeKey === null
@@ -2032,10 +2085,14 @@ export default function Sidebar() {
     [scopedProjectGroup],
   );
   useEffect(() => {
-    if (projectScopeKey !== null && scopedProjectGroup === null) {
+    if (
+      allEnvironmentShellsBootstrapped &&
+      projectScopeKey !== null &&
+      scopedProjectGroup === null
+    ) {
       setProjectScopeKey(null);
     }
-  }, [projectScopeKey, scopedProjectGroup]);
+  }, [allEnvironmentShellsBootstrapped, projectScopeKey, scopedProjectGroup]);
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
   // subscription. Selecting a number keeps typing in a draft composer from
@@ -2228,6 +2285,96 @@ export default function Sidebar() {
       ),
     [projectGroups],
   );
+  const detachedThreadUrlByKey = useMemo(() => {
+    if (!isElectron) return new Map<string, string>();
+    const urls = new Map<string, string>();
+    for (const thread of threads) {
+      const projectKey = logicalProjectKeyByThreadProjectKey.get(
+        `${thread.environmentId}:${thread.projectId}`,
+      );
+      if (projectKey === undefined) continue;
+      const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+      urls.set(
+        scopedThreadKey(threadRef),
+        buildDetachedThreadUrl({
+          baseUrl: window.location.href,
+          threadRef,
+          projectScopeKey: projectKey,
+        }),
+      );
+    }
+    return urls;
+  }, [logicalProjectKeyByThreadProjectKey, threads]);
+  const detachedProjectUrlByKey = useMemo(() => {
+    if (!isElectron) return new Map<string, string>();
+    const urls = new Map<string, string>();
+    for (const project of projectGroups) {
+      const memberKeys = new Set(
+        project.memberProjectRefs.map(
+          (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
+        ),
+      );
+      const latestThread = sortThreads(
+        threads.filter(
+          (thread) =>
+            thread.archivedAt === null &&
+            memberKeys.has(`${thread.environmentId}:${thread.projectId}`),
+        ),
+        sidebarThreadSortOrder,
+      )[0];
+      urls.set(
+        project.projectKey,
+        buildDetachedProjectUrl({
+          baseUrl: window.location.href,
+          projectScopeKey: project.projectKey,
+          threadRef: latestThread
+            ? scopeThreadRef(latestThread.environmentId, latestThread.id)
+            : null,
+        }),
+      );
+    }
+    return urls;
+  }, [projectGroups, sidebarThreadSortOrder, threads]);
+  const lastDragScreenPointRef = useRef<ScreenPoint | null>(null);
+  useEffect(() => {
+    if (!isElectron) return;
+    const rememberPointer = (event: PointerEvent) => {
+      lastDragScreenPointRef.current = { x: event.screenX, y: event.screenY };
+    };
+    window.addEventListener("pointermove", rememberPointer, true);
+    return () => window.removeEventListener("pointermove", rememberPointer, true);
+  }, []);
+  const rememberDetachedDragPoint = useCallback((event: ReactDragEvent) => {
+    // Chromium emits a synthetic all-zero drag event at the end of some
+    // native drags. Keep the last real screen coordinate in that case.
+    if (event.screenX !== 0 || event.screenY !== 0 || event.clientX !== 0 || event.clientY !== 0) {
+      lastDragScreenPointRef.current = { x: event.screenX, y: event.screenY };
+    }
+  }, []);
+  const detachAtLastDragPoint = useCallback((url: string): boolean => {
+    if (!isElectron) return false;
+    const point = lastDragScreenPointRef.current;
+    if (
+      point === null ||
+      !isScreenPointOutsideWindow(point, {
+        x: window.screenX,
+        y: window.screenY,
+        width: window.outerWidth,
+        height: window.outerHeight,
+      })
+    ) {
+      return false;
+    }
+    openDetachedWindow({ url, point, sourceWindow: window });
+    return true;
+  }, []);
+  const handleDetachedNativeDragEnd = useCallback(
+    (event: ReactDragEvent, url: string) => {
+      rememberDetachedDragPoint(event);
+      detachAtLastDragPoint(url);
+    },
+    [detachAtLastDragPoint, rememberDetachedDragPoint],
+  );
   // Pinned and active only: a snoozed or settled thread is parked on purpose
   // and must not light its project up as if it needed attention.
   const projectActivityByKey = useMemo(
@@ -2304,6 +2451,8 @@ export default function Sidebar() {
   // that is offline), and indexing the rendered rows would move the wrong one.
   const handlePinnedProjectDragEnd = useCallback(
     (event: DragEndEvent) => {
+      const detachedUrl = detachedProjectUrlByKey.get(String(event.active.id));
+      if (detachedUrl !== undefined && detachAtLastDragPoint(detachedUrl)) return;
       const overId = event.over?.id;
       if (overId === undefined || overId === event.active.id) return;
       setPinnedProjectKeys((keys) => {
@@ -2313,7 +2462,7 @@ export default function Sidebar() {
         return arrayMove([...keys], fromIndex, toIndex);
       });
     },
-    [setPinnedProjectKeys],
+    [detachAtLastDragPoint, detachedProjectUrlByKey, setPinnedProjectKeys],
   );
 
   const threadSearchResults = useMemo(
@@ -2905,6 +3054,8 @@ export default function Sidebar() {
   const handlePinnedDragEnd = useCallback(
     (event: DragEndEvent) => {
       const activeKey = String(event.active.id);
+      const detachedUrl = detachedThreadUrlByKey.get(activeKey);
+      if (detachedUrl !== undefined && detachAtLastDragPoint(detachedUrl)) return;
       const overKey = event.over === null ? null : String(event.over.id);
       if (overKey === null || activeKey === overKey) return;
       const reorderable = orderedPinnedThreads.filter((thread) =>
@@ -2966,7 +3117,13 @@ export default function Sidebar() {
         }
       })();
     },
-    [orderedPinnedThreads, reorderPinnedThread, reorderablePinnedKeys],
+    [
+      detachAtLastDragPoint,
+      detachedThreadUrlByKey,
+      orderedPinnedThreads,
+      reorderPinnedThread,
+      reorderablePinnedKeys,
+    ],
   );
   // One snooze per thread at a time — same double-dispatch guard as settle.
   const snoozingThreadKeysRef = useRef(new Set<string>());
@@ -3912,9 +4069,12 @@ export default function Sidebar() {
                       sortable?: SortablePinnedRowBag,
                     ) => {
                       const isPinnedProject = pinnedProjectKeys.includes(project.projectKey);
+                      const detachedWindowUrl =
+                        detachedProjectUrlByKey.get(project.projectKey) ?? null;
                       return (
                         <li
                           key={project.projectKey}
+                          draggable={sortable === undefined && detachedWindowUrl !== null}
                           ref={sortable?.setNodeRef}
                           style={
                             sortable
@@ -3925,6 +4085,22 @@ export default function Sidebar() {
                               : undefined
                           }
                           {...(sortable?.listeners ?? {})}
+                          onDragStart={(event) => {
+                            if (detachedWindowUrl === null) {
+                              event.preventDefault();
+                              return;
+                            }
+                            event.dataTransfer.effectAllowed = "copy";
+                            event.dataTransfer.setData("text/plain", project.displayName);
+                            event.dataTransfer.setData("text/uri-list", detachedWindowUrl);
+                            rememberDetachedDragPoint(event);
+                          }}
+                          onDrag={rememberDetachedDragPoint}
+                          onDragEnd={(event) => {
+                            if (detachedWindowUrl !== null) {
+                              handleDetachedNativeDragEnd(event, detachedWindowUrl);
+                            }
+                          }}
                           onContextMenu={(event) => handleProjectContextMenu(event, project)}
                           className={cn(
                             "group/lane-row relative flex items-center gap-0.5",
@@ -4184,6 +4360,9 @@ export default function Sidebar() {
                               }
                               isPinned={thread.pinnedAt != null}
                               sortable={sortable}
+                              detachedWindowUrl={detachedThreadUrlByKey.get(threadKey) ?? null}
+                              onDetachedDrag={rememberDetachedDragPoint}
+                              onDetachedDragEnd={handleDetachedNativeDragEnd}
                               snoozeWakeLabelText={
                                 section === "snoozed" && thread.snoozedUntil != null
                                   ? snoozeWakeLabel(thread.snoozedUntil, {

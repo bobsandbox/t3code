@@ -1645,12 +1645,19 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       event: Electron.Event,
       input: Electron.Input,
     ) {
+      const hostWebContents = wc.hostWebContents;
       const mainWindow = yield* Ref.get(mainWindowRef);
-      if (!isAppShortcut(input) || Option.isNone(mainWindow) || mainWindow.value.isDestroyed()) {
+      const hostWindow =
+        hostWebContents === null || Option.isNone(mainWindow)
+          ? null
+          : mainWindow.value.webContents === hostWebContents
+            ? mainWindow.value
+            : BrowserWindow.fromWebContents(hostWebContents);
+      if (!isAppShortcut(input) || hostWindow === null || hostWindow.isDestroyed()) {
         return;
       }
       event.preventDefault();
-      mainWindow.value.webContents.sendInputEvent({
+      hostWindow.webContents.sendInputEvent({
         type: "keyDown",
         keyCode: input.key,
         modifiers: [
@@ -1886,12 +1893,19 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       return yield* new PreviewTabNotFoundError({ tabId });
     }
     const wc = webContents.fromId(webContentsId);
+    const hostWebContents = wc?.hostWebContents ?? null;
     const mainWindow = yield* Ref.get(mainWindowRef);
+    const hostWindow =
+      hostWebContents === null || Option.isNone(mainWindow)
+        ? null
+        : mainWindow.value.webContents === hostWebContents
+          ? mainWindow.value
+          : BrowserWindow.fromWebContents(hostWebContents);
     if (
       !wc ||
       wc.isDestroyed() ||
       wc.getType() !== "webview" ||
-      (Option.isSome(mainWindow) && wc.hostWebContents !== mainWindow.value.webContents)
+      (Option.isSome(mainWindow) && (hostWindow === null || hostWindow.isDestroyed()))
     ) {
       return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId });
     }

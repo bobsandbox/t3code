@@ -1,9 +1,28 @@
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { isCurrentPreviewRuntimeTab, previewRuntimeTabId } from "./previewRuntimeTabId";
+import {
+  isCurrentPreviewRuntimeTab,
+  previewRuntimeTabId,
+  resolvePreviewRendererWindowId,
+} from "./previewRuntimeTabId";
 
 describe("previewRuntimeTabId", () => {
+  it("gives a detached renderer its URL identity and keeps it across navigation", () => {
+    expect(
+      resolvePreviewRendererWindowId({
+        locationUrl: "t3code://app/env/thread?t3WindowId=window-a",
+        persistedWindowId: null,
+      }),
+    ).toBe("window-a");
+    expect(
+      resolvePreviewRendererWindowId({
+        locationUrl: "t3code://app/env/other-thread",
+        persistedWindowId: "window-a",
+      }),
+    ).toBe("window-a");
+  });
+
   it("scopes process-local tab ids to their environment, thread, and server epoch", () => {
     const base = {
       environmentId: EnvironmentId.make("environment-a"),
